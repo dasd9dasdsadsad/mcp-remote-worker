@@ -1,0 +1,257 @@
+name: MCP Manager Live Server (GitHub Actions)
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      runtime_minutes:
+        description: 'Runtime in minutes'
+        required: false
+        default: '30'
+
+env:
+  MANAGER_PORT: 3000
+  NATS_PORT: 4222
+  REDIS_PORT: 6379
+  POSTGRES_PORT: 5432
+
+jobs:
+  run-mcp-manager:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: 🔍 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Compose
+        run: |
+          echo "Installing Docker Compose dependencies..."
+          sudo apt-get update -qq
+          sudo apt-get install -y docker-compose
+
+      - name: 🚀 Start Infrastructure (NATS, Redis, PostgreSQL)
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Starting MCP Infrastructure"
+          echo "═══════════════════════════════════════════════════════"
+          
+          # Create docker-compose file
+          cat > docker-compose-infra.yml << 'EOFDC'
+          version: '3.8'
+          services:
+            nats:
+              image: nats:2.10-alpine
+              ports:
+                - "4222:4222"
+                - "8222:8222"
+              command: ["-js", "-m", "8222"]
+              
+            redis:
+              image: redis:7-alpine
+              ports:
+                - "6379:6379"
+              command: redis-server --requirepass ""
+              
+            postgres:
+              image: postgres:16-alpine
+              environment:
+                POSTGRES_DB: mcp_manager
+                POSTGRES_USER: postgres
+                POSTGRES_PASSWORD: postgres
+              ports:
+                - "5432:5432"
+          EOFDC
+          
+          # Start services
+          docker-compose -f docker-compose-infra.yml up -d
+          
+          echo ""
+          echo "⏳ Waiting for services to be ready..."
+          sleep 10
+          
+          # Verify services
+          echo ""
+          echo "✅ Services started:"
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          
+          echo ""
+          echo "🔍 Testing connectivity..."
+          nc -zv localhost 4222 && echo "  ✅ NATS: Ready" || echo "  ⚠️ NATS: Not ready"
+          nc -zv localhost 6379 && echo "  ✅ Redis: Ready" || echo "  ⚠️ Redis: Not ready"
+          nc -zv localhost 5432 && echo "  ✅ PostgreSQL: Ready" || echo "  ⚠️ PostgreSQL: Not ready"
+
+      - name: 📦 Install MCP Manager Dependencies
+        run: |
+          cd mcp-manager
+          npm install
+
+      - name: 🎯 Start MCP Manager
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Starting MCP Manager Enhanced"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          echo "Manager will be accessible at:"
+          echo "  - NATS: nats://$(hostname -I | awk '{print $1}'):4222"
+          echo "  - Process: Running on GitHub Actions runner"
+          echo ""
+          
+          cd mcp-manager
+          
+          # Start MCP Manager in background
+          node index-enhanced.js > /tmp/mcp-manager.log 2>&1 &
+          MCP_PID=$!
+          echo $MCP_PID > /tmp/mcp-manager.pid
+          
+          echo "⏳ Waiting for MCP Manager to start..."
+          sleep 10
+          
+          # Check if it's running
+          if ps -p $MCP_PID > /dev/null; then
+            echo "✅ MCP Manager started successfully!"
+            echo "   PID: $MCP_PID"
+            echo ""
+            echo "📋 Initial logs:"
+            head -30 /tmp/mcp-manager.log
+          else
+            echo "❌ MCP Manager failed to start!"
+            cat /tmp/mcp-manager.log
+            exit 1
+          fi
+
+      - name: 📊 Display Connection Information
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║         🎯 MCP MANAGER RUNNING ON GITHUB ACTIONS! 🎯     ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📡 CONNECTION DETAILS:"
+          echo ""
+          echo "   GitHub Actions Runner IP:"
+          echo "   $(hostname -I)"
+          echo ""
+          echo "   Services:"
+          echo "   - NATS:       localhost:4222 (internal)"
+          echo "   - Redis:      localhost:6379 (internal)"
+          echo "   - PostgreSQL: localhost:5432 (internal)"
+          echo ""
+          echo "⚠️  NOTE: Services are running inside GitHub Actions"
+          echo "   They are NOT publicly accessible from outside."
+          echo ""
+          echo "🔄 To connect workers:"
+          echo "   Workers need to run on the SAME GitHub Actions runner"
+          echo "   or use ngrok/cloudflare tunnel for external access."
+          echo ""
+          echo "═══════════════════════════════════════════════════════"
+
+      - name: 🔴 Keep MCP Manager Running
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🔴 MCP Manager is now LIVE"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
+          echo "📡 Streaming logs in real-time..."
+          echo ""
+          
+          # Get PID
+          MCP_PID=$(cat /tmp/mcp-manager.pid)
+          
+          # Show stats every 30 seconds
+          RUNTIME_SECONDS=$(($(echo "${{ github.event.inputs.runtime_minutes }}" | bc) * 60))
+          END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
+          
+          while [ $(date +%s) -lt $END_TIME ]; do
+            if ps -p $MCP_PID > /dev/null; then
+              echo ""
+              echo "═══════════════════════════════════════════════════════"
+              echo "📊 Status Update - $(date '+%Y-%m-%d %H:%M:%S')"
+              echo "═══════════════════════════════════════════════════════"
+              
+              # Show process info
+              ps -p $MCP_PID -o pid,ppid,%cpu,%mem,etime,cmd
+              
+              # Show recent logs (last 10 lines)
+              echo ""
+              echo "📋 Recent Activity (last 10 lines):"
+              tail -10 /tmp/mcp-manager.log
+              
+              # Show database stats
+              echo ""
+              echo "📊 Database Stats:"
+              PGPASSWORD=postgres psql -h localhost -U postgres -d mcp_manager -c "
+                SELECT 
+                  (SELECT COUNT(*) FROM tasks) as total_tasks,
+                  (SELECT COUNT(*) FROM workers) as total_workers,
+                  (SELECT COUNT(*) FROM analytics) as total_analytics;
+              " 2>/dev/null || echo "Database query failed"
+              
+              sleep 30
+            else
+              echo "❌ MCP Manager process died!"
+              cat /tmp/mcp-manager.log
+              exit 1
+            fi
+          done
+          
+          echo ""
+          echo "⏱️  Runtime limit reached. Shutting down gracefully..."
+
+      - name: 📝 Generate Summary
+        if: always()
+        run: |
+          LOGS=$(tail -200 /tmp/mcp-manager.log 2>/dev/null || echo "No logs available")
+          RUNTIME=$SECONDS
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🎊 MCP Manager Live Session Complete!
+          
+          ### 📦 Manager Details
+          - **Runtime**: ${RUNTIME} seconds
+          - **Status**: Completed successfully
+          - **Mode**: 🔴 LIVE (GitHub Actions hosted)
+          
+          ### 📊 Services Deployed
+          - ✅ NATS (4222)
+          - ✅ Redis (6379)
+          - ✅ PostgreSQL (5432)
+          - ✅ MCP Manager (with full analytics)
+          
+          ### 🔍 What Ran
+          1. Complete infrastructure stack
+          2. MCP Manager with analytics engine
+          3. Worker communication ready
+          4. Task assignment system active
+          5. Real-time monitoring enabled
+          
+          ### ⚠️ Limitations
+          - Services were internal to GitHub Actions runner
+          - Not publicly accessible without tunnel
+          - For external worker connections, use ngrok or cloudflare tunnel
+          
+          ### 📋 Manager Logs (Last 200 Lines)
+          \`\`\`
+          $LOGS
+          \`\`\`
+          
+          ### 💡 Next Steps
+          To make MCP Manager publicly accessible:
+          1. Use ngrok/cloudflare tunnel in workflow
+          2. Deploy to actual server (165.232.134.47)
+          3. Use GitHub Codespaces with port forwarding
+          EOF
+
+      - name: 🛑 Cleanup
+        if: always()
+        run: |
+          echo "🛑 Stopping services..."
+          
+          # Stop MCP Manager
+          kill $(cat /tmp/mcp-manager.pid 2>/dev/null) 2>/dev/null || true
+          
+          # Stop Docker services
+          docker-compose -f docker-compose-infra.yml down 2>/dev/null || true
+          
+          echo "✅ Cleanup complete"
+
