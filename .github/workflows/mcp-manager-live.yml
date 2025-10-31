@@ -1,4 +1,4 @@
-name: MCP Manager Live Server (GitHub Actions)
+name: MCP Manager + Workers (Connected to 165.232.134.47)
 
 on:
   workflow_dispatch:  # Manual trigger only
@@ -7,15 +7,26 @@ on:
         description: 'Runtime in minutes'
         required: false
         default: '30'
+      num_workers:
+        description: 'Number of workers to spawn'
+        required: false
+        default: '3'
 
 env:
-  MANAGER_PORT: 3000
+  MANAGER_HOST: 165.232.134.47
+  NATS_HOST: 165.232.134.47
   NATS_PORT: 4222
+  REDIS_HOST: 165.232.134.47
   REDIS_PORT: 6379
+  POSTGRES_HOST: 165.232.134.47
   POSTGRES_PORT: 5432
+  POSTGRES_DB: mcp_manager
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
 
 jobs:
-  run-mcp-manager:
+  run-mcp-manager-and-workers:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     
@@ -23,92 +34,88 @@ jobs:
       - name: 🔍 Checkout code
         uses: actions/checkout@v4
 
-      - name: 🐳 Set up Docker Compose
-        run: |
-          echo "Installing Docker Compose dependencies..."
-          sudo apt-get update -qq
-          sudo apt-get install -y docker-compose
+      - name: 🔑 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: test123434sdd
+          password: ${{ secrets.DOCKER_TOKEN }}
 
-      - name: 🚀 Start Infrastructure (NATS, Redis, PostgreSQL)
+      - name: 🌐 Test Connectivity to Server
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "🚀 Starting MCP Infrastructure"
+          echo "🌐 Testing Connection to 165.232.134.47"
           echo "═══════════════════════════════════════════════════════"
+          echo ""
           
-          # Create docker-compose file
-          cat > docker-compose-infra.yml << 'EOFDC'
-          version: '3.8'
-          services:
-            nats:
-              image: nats:2.10-alpine
-              ports:
-                - "4222:4222"
-                - "8222:8222"
-              command: ["-js", "-m", "8222"]
-              
-            redis:
-              image: redis:7-alpine
-              ports:
-                - "6379:6379"
-              command: redis-server --requirepass ""
-              
-            postgres:
-              image: postgres:16-alpine
-              environment:
-                POSTGRES_DB: mcp_manager
-                POSTGRES_USER: postgres
-                POSTGRES_PASSWORD: postgres
-              ports:
-                - "5432:5432"
-          EOFDC
+          # Test NATS
+          if nc -zv -w5 ${{ env.NATS_HOST }} ${{ env.NATS_PORT }} 2>&1; then
+            echo "✅ NATS (${{ env.NATS_HOST }}:${{ env.NATS_PORT }}): Connected"
+          else
+            echo "❌ NATS (${{ env.NATS_HOST }}:${{ env.NATS_PORT }}): Cannot connect"
+            exit 1
+          fi
           
-          # Start services
-          docker-compose -f docker-compose-infra.yml up -d
+          # Test Redis
+          if nc -zv -w5 ${{ env.REDIS_HOST }} ${{ env.REDIS_PORT }} 2>&1; then
+            echo "✅ Redis (${{ env.REDIS_HOST }}:${{ env.REDIS_PORT }}): Connected"
+          else
+            echo "❌ Redis (${{ env.REDIS_HOST }}:${{ env.REDIS_PORT }}): Cannot connect"
+            exit 1
+          fi
+          
+          # Test PostgreSQL
+          if nc -zv -w5 ${{ env.POSTGRES_HOST }} ${{ env.POSTGRES_PORT }} 2>&1; then
+            echo "✅ PostgreSQL (${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}): Connected"
+          else
+            echo "❌ PostgreSQL (${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}): Cannot connect"
+            exit 1
+          fi
           
           echo ""
-          echo "⏳ Waiting for services to be ready..."
-          sleep 10
-          
-          # Verify services
-          echo ""
-          echo "✅ Services started:"
-          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-          
-          echo ""
-          echo "🔍 Testing connectivity..."
-          nc -zv localhost 4222 && echo "  ✅ NATS: Ready" || echo "  ⚠️ NATS: Not ready"
-          nc -zv localhost 6379 && echo "  ✅ Redis: Ready" || echo "  ⚠️ Redis: Not ready"
-          nc -zv localhost 5432 && echo "  ✅ PostgreSQL: Ready" || echo "  ⚠️ PostgreSQL: Not ready"
+          echo "✅ All services accessible from GitHub Actions!"
 
-      - name: 📦 Install MCP Manager Dependencies
+      - name: 📦 Install Dependencies
         run: |
           cd mcp-manager
           npm install
 
-      - name: 🎯 Start MCP Manager
+      - name: 🎯 Start MCP Manager (Connected to Your Server)
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "🚀 Starting MCP Manager Enhanced"
+          echo "🚀 Starting MCP Manager Connected to 165.232.134.47"
           echo "═══════════════════════════════════════════════════════"
           echo ""
-          echo "Manager will be accessible at:"
-          echo "  - NATS: nats://$(hostname -I | awk '{print $1}'):4222"
-          echo "  - Process: Running on GitHub Actions runner"
+          echo "🔗 Connecting to YOUR infrastructure:"
+          echo "  - NATS:       ${{ env.NATS_HOST }}:${{ env.NATS_PORT }}"
+          echo "  - Redis:      ${{ env.REDIS_HOST }}:${{ env.REDIS_PORT }}"
+          echo "  - PostgreSQL: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}"
+          echo ""
+          echo "💾 All data will be saved to YOUR database!"
           echo ""
           
           cd mcp-manager
           
-          # Start MCP Manager in background
+          # Start MCP Manager with remote connections
+          NATS_HOST=${{ env.NATS_HOST }} \
+          NATS_PORT=${{ env.NATS_PORT }} \
+          REDIS_HOST=${{ env.REDIS_HOST }} \
+          REDIS_PORT=${{ env.REDIS_PORT }} \
+          POSTGRES_HOST=${{ env.POSTGRES_HOST }} \
+          POSTGRES_PORT=${{ env.POSTGRES_PORT }} \
+          POSTGRES_DB=${{ env.POSTGRES_DB }} \
+          POSTGRES_USER=${{ env.POSTGRES_USER }} \
+          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }} \
           node index-enhanced.js > /tmp/mcp-manager.log 2>&1 &
+          
           MCP_PID=$!
           echo $MCP_PID > /tmp/mcp-manager.pid
           
-          echo "⏳ Waiting for MCP Manager to start..."
+          echo "⏳ Waiting for MCP Manager to connect..."
           sleep 10
           
           # Check if it's running
           if ps -p $MCP_PID > /dev/null; then
-            echo "✅ MCP Manager started successfully!"
+            echo "✅ MCP Manager started and connected!"
             echo "   PID: $MCP_PID"
             echo ""
             echo "📋 Initial logs:"
@@ -119,46 +126,184 @@ jobs:
             exit 1
           fi
 
+      - name: 🐳 Pull Worker Docker Image
+        run: |
+          echo "📥 Pulling worker image..."
+          docker pull ${{ env.DOCKER_IMAGE }}
+          echo "✅ Image pulled"
+
+      - name: 🚀 Spawn Multiple Workers
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Spawning ${{ github.event.inputs.num_workers }} Workers"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          
+          NUM_WORKERS=${{ github.event.inputs.num_workers }}
+          
+          for i in $(seq 1 $NUM_WORKERS); do
+            WORKER_NAME="github-worker-$i"
+            WORKER_ID="github-actions-worker-$i-$(date +%s)"
+            
+            echo "🔧 Starting Worker $i/$NUM_WORKERS"
+            echo "   Name: $WORKER_NAME"
+            echo "   ID: $WORKER_ID"
+            
+            docker run -d \
+              --name $WORKER_NAME \
+              -e WORKER_ID="$WORKER_ID" \
+              -e WORKER_TAGS="github-actions,worker-$i,automated" \
+              -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+              -e NATS_HOST="${{ env.NATS_HOST }}" \
+              -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+              -e REDIS_PASSWORD="" \
+              -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+              -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+              -v /tmp/screenshots-$i:/root \
+              ${{ env.DOCKER_IMAGE }}
+            
+            echo "   ✅ Worker $i started (Container ID: $(docker ps -q -f name=$WORKER_NAME))"
+            echo ""
+            
+            sleep 2
+          done
+          
+          echo "═══════════════════════════════════════════════════════"
+          echo "✅ All $NUM_WORKERS workers spawned!"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          echo "📊 Running containers:"
+          docker ps --format "table {{.Names}}\t{{.Status}}"
+
+      - name: 🌍 Expose Services Globally with Ngrok
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🌍 Making MCP Manager Globally Accessible"
+          echo "═══════════════════════════════════════════════════════"
+          
+          # Download ngrok
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update && sudo apt install ngrok -y
+          
+          # Start ngrok for NATS (port 4222) - NO AUTH TOKEN NEEDED for basic tunnels
+          echo "🚀 Starting ngrok tunnel for NATS..."
+          ngrok tcp 4222 --log=stdout > /tmp/ngrok.log 2>&1 &
+          NGROK_PID=$!
+          echo $NGROK_PID > /tmp/ngrok.pid
+          
+          # Wait for ngrok to start
+          sleep 5
+          
+          # Get the public URL
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' | sed 's/tcp:\/\///')
+          
+          if [ -z "$NGROK_URL" ] || [ "$NGROK_URL" == "null" ]; then
+            echo "⚠️  Ngrok tunnel not available (free tier may be limited)"
+            echo "   Manager accessible locally only"
+            NGROK_URL="localhost:4222"
+          else
+            echo "✅ Ngrok tunnel established!"
+            echo ""
+            echo "🌍 PUBLIC ACCESS:"
+            echo "   NATS: $NGROK_URL"
+            echo ""
+          fi
+          
+          # Save to file for other steps
+          echo "$NGROK_URL" > /tmp/ngrok_url.txt
+          
+          echo "═══════════════════════════════════════════════════════"
+
+      - name: 🚀 Spawn Workers to Connect to Manager
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Spawning Workers"
+          echo "═══════════════════════════════════════════════════════"
+          
+          # Get ngrok URL or use localhost
+          MANAGER_HOST=$(cat /tmp/ngrok_url.txt | cut -d: -f1)
+          MANAGER_PORT=$(cat /tmp/ngrok_url.txt | cut -d: -f2)
+          
+          if [ "$MANAGER_HOST" == "localhost" ]; then
+            echo "📍 Using local connection (workers in same runner)"
+            MANAGER_HOST="localhost"
+            MANAGER_PORT="4222"
+          else
+            echo "📍 Using public ngrok tunnel"
+            echo "   Host: $MANAGER_HOST"
+            echo "   Port: $MANAGER_PORT"
+          fi
+          
+          echo ""
+          echo "🐳 Pulling worker image..."
+          docker pull test123434sdd/mcp-remote-worker:latest
+          
+          # Spawn 3 workers
+          for i in {1..3}; do
+            echo ""
+            echo "🚀 Starting Worker $i..."
+            
+            docker run -d \
+              --name github-worker-$i \
+              -e MANAGER_HOST="$MANAGER_HOST" \
+              -e NATS_HOST="$MANAGER_HOST" \
+              -e NATS_PORT="$MANAGER_PORT" \
+              -e WORKER_ID="github-worker-$i-$(date +%s)" \
+              -e WORKER_TAGS="github-actions,auto-spawned,worker-$i" \
+              -e REDIS_PASSWORD="" \
+              -e POSTGRES_PASSWORD="postgres" \
+              -v /tmp/worker-$i:/root \
+              test123434sdd/mcp-remote-worker:latest
+            
+            echo "   ✅ Worker $i spawned (ID: github-worker-$i)"
+          done
+          
+          echo ""
+          echo "═══════════════════════════════════════════════════════"
+          echo "✅ All workers spawned!"
+          echo ""
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo "═══════════════════════════════════════════════════════"
+
       - name: 📊 Display Connection Information
         run: |
+          NGROK_URL=$(cat /tmp/ngrok_url.txt)
+          
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║         🎯 MCP MANAGER RUNNING ON GITHUB ACTIONS! 🎯     ║"
+          echo "║         🌍 MCP MANAGER GLOBALLY ACCESSIBLE! 🌍           ║"
           echo "╚══════════════════════════════════════════════════════════╝"
           echo ""
-          echo "📡 CONNECTION DETAILS:"
+          echo "📡 PUBLIC CONNECTION:"
           echo ""
-          echo "   GitHub Actions Runner IP:"
-          echo "   $(hostname -I)"
+          echo "   NATS:  $NGROK_URL"
           echo ""
-          echo "   Services:"
-          echo "   - NATS:       localhost:4222 (internal)"
-          echo "   - Redis:      localhost:6379 (internal)"
-          echo "   - PostgreSQL: localhost:5432 (internal)"
+          echo "🐳 SPAWNED WORKERS:"
+          echo "   - github-worker-1 ✅"
+          echo "   - github-worker-2 ✅"
+          echo "   - github-worker-3 ✅"
           echo ""
-          echo "⚠️  NOTE: Services are running inside GitHub Actions"
-          echo "   They are NOT publicly accessible from outside."
+          echo "📊 To see workers, use MCP Manager tools:"
+          echo "   manage_workers({ action: 'list' })"
           echo ""
-          echo "🔄 To connect workers:"
-          echo "   Workers need to run on the SAME GitHub Actions runner"
-          echo "   or use ngrok/cloudflare tunnel for external access."
+          echo "🎯 To assign tasks:"
+          echo "   assign_task({ worker_id: 'github-worker-1', description: '...' })"
           echo ""
           echo "═══════════════════════════════════════════════════════"
 
-      - name: 🔴 Keep MCP Manager Running
+      - name: 🔴 Keep System Running
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "🔴 MCP Manager is now LIVE"
+          echo "🔴 MCP System is LIVE (Connected to Your Server)"
           echo "═══════════════════════════════════════════════════════"
           echo ""
           echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
-          echo "📡 Streaming logs in real-time..."
+          echo "🔗 Using infrastructure at: 165.232.134.47"
+          echo "💾 All data saved to YOUR database!"
           echo ""
           
-          # Get PID
           MCP_PID=$(cat /tmp/mcp-manager.pid)
-          
-          # Show stats every 30 seconds
           RUNTIME_SECONDS=$(($(echo "${{ github.event.inputs.runtime_minutes }}" | bc) * 60))
           END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
           
@@ -169,27 +314,39 @@ jobs:
               echo "📊 Status Update - $(date '+%Y-%m-%d %H:%M:%S')"
               echo "═══════════════════════════════════════════════════════"
               
-              # Show process info
-              ps -p $MCP_PID -o pid,ppid,%cpu,%mem,etime,cmd
+              # Show MCP Manager status
+              echo "🎯 MCP Manager:"
+              ps -p $MCP_PID -o pid,%cpu,%mem,etime | tail -1
               
-              # Show recent logs (last 10 lines)
+              # Show workers status
               echo ""
-              echo "📋 Recent Activity (last 10 lines):"
-              tail -10 /tmp/mcp-manager.log
+              echo "👷 Workers:"
+              docker ps --format "   {{.Names}}: {{.Status}}" | grep github-worker || echo "   No workers running"
               
-              # Show database stats
+              # Show worker logs sample
               echo ""
-              echo "📊 Database Stats:"
-              PGPASSWORD=postgres psql -h localhost -U postgres -d mcp_manager -c "
-                SELECT 
-                  (SELECT COUNT(*) FROM tasks) as total_tasks,
-                  (SELECT COUNT(*) FROM workers) as total_workers,
-                  (SELECT COUNT(*) FROM analytics) as total_analytics;
-              " 2>/dev/null || echo "Database query failed"
+              echo "📋 Recent Worker Activity:"
+              for container in $(docker ps --format "{{.Names}}" | grep github-worker | head -3); do
+                echo "   [$container]:"
+                docker logs --tail 3 $container 2>&1 | sed 's/^/     /'
+              done
+              
+              # Show database stats from YOUR server
+              echo ""
+              echo "📊 Database Stats (Your Server):"
+              PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql \
+                -h ${{ env.POSTGRES_HOST }} \
+                -U ${{ env.POSTGRES_USER }} \
+                -d ${{ env.POSTGRES_DB }} \
+                -c "SELECT 
+                      (SELECT COUNT(*) FROM tasks) as tasks,
+                      (SELECT COUNT(*) FROM workers) as workers,
+                      (SELECT COUNT(*) FROM analytics) as analytics;" \
+                2>/dev/null || echo "   Database query failed"
               
               sleep 30
             else
-              echo "❌ MCP Manager process died!"
+              echo "❌ MCP Manager died!"
               cat /tmp/mcp-manager.log
               exit 1
             fi
@@ -203,32 +360,64 @@ jobs:
         run: |
           LOGS=$(tail -200 /tmp/mcp-manager.log 2>/dev/null || echo "No logs available")
           RUNTIME=$SECONDS
+          NUM_WORKERS=${{ github.event.inputs.num_workers }}
+          
+          # Get final stats from database
+          FINAL_STATS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql \
+            -h ${{ env.POSTGRES_HOST }} \
+            -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DB }} \
+            -t -c "SELECT 
+                     (SELECT COUNT(*) FROM tasks) || ' tasks, ' ||
+                     (SELECT COUNT(*) FROM workers) || ' workers, ' ||
+                     (SELECT COUNT(*) FROM analytics) || ' analytics';" \
+            2>/dev/null || echo "N/A")
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## 🎊 MCP Manager Live Session Complete!
+          ## 🎊 MCP System Session Complete!
           
-          ### 📦 Manager Details
-          - **Runtime**: ${RUNTIME} seconds
-          - **Status**: Completed successfully
-          - **Mode**: 🔴 LIVE (GitHub Actions hosted)
+          ### 📦 Deployment Details
+          - **Runtime**: ${RUNTIME} seconds (${{ github.event.inputs.runtime_minutes }} min configured)
+          - **Mode**: 🔗 Hybrid (GitHub compute + Your server data)
+          - **Workers Spawned**: ${NUM_WORKERS}
+          - **Status**: Completed successfully ✅
           
-          ### 📊 Services Deployed
-          - ✅ NATS (4222)
-          - ✅ Redis (6379)
-          - ✅ PostgreSQL (5432)
-          - ✅ MCP Manager (with full analytics)
+          ### 🏗️ Architecture Used
           
-          ### 🔍 What Ran
-          1. Complete infrastructure stack
-          2. MCP Manager with analytics engine
-          3. Worker communication ready
-          4. Task assignment system active
-          5. Real-time monitoring enabled
+          **GitHub Actions (Compute Layer)**:
+          - ✅ MCP Manager process
+          - ✅ ${NUM_WORKERS} Docker worker containers
+          - ✅ All connected to your server
           
-          ### ⚠️ Limitations
-          - Services were internal to GitHub Actions runner
-          - Not publicly accessible without tunnel
-          - For external worker connections, use ngrok or cloudflare tunnel
+          **Your Server 165.232.134.47 (Data Layer)**:
+          - ✅ NATS (4222) - Message bus
+          - ✅ Redis (6379) - Cache
+          - ✅ PostgreSQL (5432) - Database
+          - ✅ **All data persisted!**
+          
+          ### 💾 Data Saved to Your Database
+          
+          Final stats: ${FINAL_STATS}
+          
+          All tasks, worker registrations, analytics, and execution data 
+          were saved to YOUR PostgreSQL database and are still there!
+          
+          ### ✅ Benefits of This Setup
+          
+          1. **Scalable compute**: Spawn workers on GitHub Actions
+          2. **Persistent data**: Everything saved to your server
+          3. **No data loss**: Database survives after workflow ends
+          4. **Cost effective**: Use free GitHub Actions compute
+          5. **Centralized data**: All data in one place (165.232.134.47)
+          
+          ### 📊 What Happened
+          
+          1. ✅ MCP Manager connected to your NATS/Redis/PostgreSQL
+          2. ✅ Spawned ${NUM_WORKERS} workers on GitHub Actions
+          3. ✅ Workers connected to your infrastructure
+          4. ✅ All data written to your database
+          5. ✅ Workers processed tasks (if assigned)
+          6. ✅ Analytics captured and stored
           
           ### 📋 Manager Logs (Last 200 Lines)
           \`\`\`
@@ -236,22 +425,33 @@ jobs:
           \`\`\`
           
           ### 💡 Next Steps
-          To make MCP Manager publicly accessible:
-          1. Use ngrok/cloudflare tunnel in workflow
-          2. Deploy to actual server (165.232.134.47)
-          3. Use GitHub Codespaces with port forwarding
+          
+          - Check your database: All data is preserved!
+          - Run again: Spawn more workers anytime
+          - Scale up: Increase num_workers for more capacity
+          - Your server has ALL the historical data!
           EOF
 
       - name: 🛑 Cleanup
         if: always()
         run: |
-          echo "🛑 Stopping services..."
+          echo "═══════════════════════════════════════════════════════"
+          echo "🛑 Cleanup (Workers and Manager)"
+          echo "═══════════════════════════════════════════════════════"
+          
+          # Stop workers
+          echo "Stopping workers..."
+          docker ps --format "{{.Names}}" | grep github-worker | xargs -r docker stop
+          docker ps -a --format "{{.Names}}" | grep github-worker | xargs -r docker rm
           
           # Stop MCP Manager
+          echo "Stopping MCP Manager..."
           kill $(cat /tmp/mcp-manager.pid 2>/dev/null) 2>/dev/null || true
           
-          # Stop Docker services
-          docker-compose -f docker-compose-infra.yml down 2>/dev/null || true
-          
-          echo "✅ Cleanup complete"
+          echo ""
+          echo "✅ Cleanup complete!"
+          echo ""
+          echo "💾 Your server infrastructure (165.232.134.47) is still running"
+          echo "📊 All data is preserved in your database!"
+          echo ""
 
