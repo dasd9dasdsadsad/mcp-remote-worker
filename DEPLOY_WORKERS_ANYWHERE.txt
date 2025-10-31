@@ -1,0 +1,148 @@
+═══════════════════════════════════════════════════════════════
+  🚀 DEPLOY MCP WORKERS ANYWHERE - ONE COMMAND 🚀
+═══════════════════════════════════════════════════════════════
+
+ALL WORKERS AUTOMATICALLY CONNECT TO: 165.232.134.47
+
+───────────────────────────────────────────────────────────────
+  📋 SETUP (Do Once) - PRIVATE REGISTRY
+───────────────────────────────────────────────────────────────
+
+1. Build & Push Docker Image (on manager server):
+
+   cd /root/mcp-setup/remote-worker-mcp
+   docker build -t mcp-remote-worker:latest .
+   
+   # Push to PRIVATE Docker Hub repo (replace with your username)
+   docker tag mcp-remote-worker:latest YOUR_USERNAME/mcp-remote-worker:latest
+   docker login
+   docker push YOUR_USERNAME/mcp-remote-worker:latest
+   
+   NOTE: Make sure repository is set to PRIVATE on Docker Hub!
+         https://hub.docker.com/ → Create Repository → Private ✅
+
+
+───────────────────────────────────────────────────────────────
+  🌍 DEPLOY ON ANY SERVER (Private Registry)
+───────────────────────────────────────────────────────────────
+
+On ANY server anywhere in the world:
+
+# Step 1: Login to Docker Hub
+docker login
+# Enter your username and password
+
+# Step 2: Pull and run worker
+docker run -d --name mcp-worker --restart unless-stopped \
+  -v /tmp/screenshots:/root \
+  YOUR_USERNAME/mcp-remote-worker:latest
+
+
+That's it! Worker will:
+✅ Connect to 165.232.134.47 automatically
+✅ Register with manager
+✅ Start accepting tasks
+✅ Report analytics
+
+🔒 SECURITY: Only authenticated users can pull your private image!
+
+
+───────────────────────────────────────────────────────────────
+  🔍 VERIFY
+───────────────────────────────────────────────────────────────
+
+Check worker logs:
+   docker logs -f mcp-worker
+
+Should see:
+   ✅ "Connected to NATS"
+   ✅ "Connected to Redis"  
+   ✅ "Connected to PostgreSQL"
+   ✅ "Worker registered successfully"
+
+
+Check from manager (using MCP tools):
+   manage_workers({ action: "list" })
+
+
+───────────────────────────────────────────────────────────────
+  🌐 DEPLOY TO MULTIPLE LOCATIONS
+───────────────────────────────────────────────────────────────
+
+AWS Server:
+   ssh user@aws-server
+   docker login  # Login first!
+   docker run -d --name mcp-worker --restart unless-stopped \
+     -e WORKER_TAGS="aws,us-east-1" \
+     -v /tmp/screenshots:/root \
+     YOUR_USERNAME/mcp-remote-worker:latest
+
+DigitalOcean:
+   ssh user@do-server
+   docker login  # Login first!
+   docker run -d --name mcp-worker --restart unless-stopped \
+     -e WORKER_TAGS="digitalocean,nyc3" \
+     -v /tmp/screenshots:/root \
+     YOUR_USERNAME/mcp-remote-worker:latest
+
+Home Server:
+   docker login  # Login first!
+   docker run -d --name mcp-worker --restart unless-stopped \
+     -e WORKER_TAGS="homelab" \
+     -v /tmp/screenshots:/root \
+     YOUR_USERNAME/mcp-remote-worker:latest
+
+
+───────────────────────────────────────────────────────────────
+  ⚙️ REQUIREMENTS
+───────────────────────────────────────────────────────────────
+
+Manager Server (165.232.134.47):
+   ✅ NATS running on port 4222
+   ✅ Redis running on port 6379
+   ✅ PostgreSQL running on port 5432
+   ✅ Firewall allows these ports
+
+Worker Servers:
+   ✅ Docker installed
+   ✅ Internet access to 165.232.134.47
+   ✅ NO INBOUND PORTS NEEDED! (workers connect out)
+
+
+───────────────────────────────────────────────────────────────
+  🛠️ USEFUL COMMANDS
+───────────────────────────────────────────────────────────────
+
+View logs:       docker logs -f mcp-worker
+Restart:         docker restart mcp-worker
+Stop:            docker stop mcp-worker
+Remove:          docker rm -f mcp-worker
+Update image:    docker pull YOUR_USERNAME/mcp-remote-worker:latest
+
+
+───────────────────────────────────────────────────────────────
+  🐛 TROUBLESHOOTING
+───────────────────────────────────────────────────────────────
+
+Test connectivity to manager:
+   nc -zv 165.232.134.47 4222   # NATS
+   nc -zv 165.232.134.47 6379   # Redis
+   nc -zv 165.232.134.47 5432   # PostgreSQL
+
+Check worker logs:
+   docker logs mcp-worker | grep -i error
+   docker logs mcp-worker | grep -i connected
+
+If ports blocked:
+   # On manager server (165.232.134.47)
+   sudo ufw allow 4222/tcp
+   sudo ufw allow 6379/tcp
+   sudo ufw allow 5432/tcp
+
+
+═══════════════════════════════════════════════════════════════
+  ✅ SUCCESS = Worker shows up in manage_workers list!
+═══════════════════════════════════════════════════════════════
+
+Questions? Check: /root/mcp-setup/SIMPLE_WORKER_DEPLOYMENT.md
+

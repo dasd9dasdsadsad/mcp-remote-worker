@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # NATS Message Broker
+  nats:
+    image: nats:latest
+    container_name: mcp-nats
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+    command: ["-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mcp-network
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: mcp-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mcp-network
+    restart: unless-stopped
+
+  # PostgreSQL Database (commented out - using existing)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: mcp-postgres
+  #   environment:
+  #     POSTGRES_DB: mcp_manager
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   networks:
+  #     - mcp-network
+  #   restart: unless-stopped
+
+  # MCP Remote Worker
+  worker:
+    image: mcp-remote-worker-enhanced:latest
+    environment:
+      # Connection settings (use localhost with host networking)
+      MANAGER_HOST: localhost
+      NATS_HOST: localhost
+      NATS_PORT: 4222
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: mcp_manager
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      
+      # Worker settings
+      MAX_CONCURRENT_TASKS: 5
+      MAX_MEMORY_MB: 4096
+      WORKER_TAGS: "mcp,docker,remote,enhanced,production"
+      
+      # IMPORTANT: Set your Cursor API key here
+      CURSOR_API_KEY: ${CURSOR_API_KEY}
+    depends_on:
+      - nats
+      - redis
+    network_mode: host
+    restart: unless-stopped
+    deploy:
+      replicas: 1  # Scale to multiple workers if needed
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+
+
+
+
+

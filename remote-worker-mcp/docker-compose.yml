@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+  mcp-remote-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Unique container name - change for multiple instances
+    container_name: mcp-remote-worker-enhanced-1
+    hostname: mcp-worker-enhanced-1
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
+    environment:
+      # ═══════════════════════════════════════════════════════════════
+      # MANAGER CONNECTION (UPDATE THIS FOR REMOTE DEPLOYMENT!)
+      # ═══════════════════════════════════════════════════════════════
+      - MANAGER_HOST=localhost
+      
+      # ═══════════════════════════════════════════════════════════════
+      # INFRASTRUCTURE HOSTS
+      # ═══════════════════════════════════════════════════════════════
+      - NATS_HOST=localhost
+      - NATS_PORT=4222
+      
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      
+      - POSTGRES_HOST=localhost
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mcp_manager
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      
+      # ═══════════════════════════════════════════════════════════════
+      # WORKER CONFIGURATION
+      # ═══════════════════════════════════════════════════════════════
+      # Worker ID (leave empty for auto-generation)
+      - WORKER_ID=
+      
+      # Worker tags for categorization
+      - WORKER_TAGS=mcp,docker,remote,enhanced,interactive
+      
+      # ═══════════════════════════════════════════════════════════════
+      # CURSOR API KEY
+      # ═══════════════════════════════════════════════════════════════
+      - CURSOR_API_KEY=key_b0686b990d598653e8e3758b72fc0b65e64ec1a5fa3878ea7db993db0a1e1bf9
+      
+      # ═══════════════════════════════════════════════════════════════
+      # WORKER CAPABILITIES
+      # ═══════════════════════════════════════════════════════════════
+      - MAX_CONCURRENT_TASKS=1
+      - MAX_MEMORY_MB=4096
+      - HEARTBEAT_INTERVAL_MS=10000
+      
+      # ═══════════════════════════════════════════════════════════════
+      # MCP CONFIGURATION
+      # ═══════════════════════════════════════════════════════════════
+      - MCP_ENABLED=true
+      - MCP_SERVERS=mcp-worker,domlogger-unified
+      
+      # ═══════════════════════════════════════════════════════════════
+      # NODE ENVIRONMENT
+      # ═══════════════════════════════════════════════════════════════
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=4096
+    
+    # Network mode (use host for local testing)
+    network_mode: host
+    
+    # For remote deployment, use bridge network:
+    # network_mode: bridge
+    # ports:
+    #   - "8080:8080"  # If worker exposes any API
+    
+    # Volume mounts
+    volumes:
+      # Worker logs
+      - worker-logs:/var/log/worker
+      
+      # Shared temp directory
+      - /tmp:/tmp
+      
+      # Chrome data (for domlogger)
+      - chrome-data:/root/.config/chromium
+      
+      # MCP configuration
+      - ./mcp-config.json:/root/.cursor/mcp.json:ro
+      
+      # Optional: Mount host directories for file access
+      # - /path/on/host:/path/in/container:ro
+    
+    # Security options
+    security_opt:
+      - seccomp:unconfined  # Required for Chrome
+    
+    # Shared memory size (required for Chrome)
+    shm_size: 2gb
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "remote-worker-mcp-client.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  worker-logs:
+    driver: local
+  chrome-data:
+    driver: local
+
+# Networks (optional - for advanced networking)
+# networks:
+#   mcp-network:
+#     external: true

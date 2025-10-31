@@ -1,0 +1,11 @@
+node_modules/
+*.log
+.env
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+*.token
+*.key
+setup-github-*.sh

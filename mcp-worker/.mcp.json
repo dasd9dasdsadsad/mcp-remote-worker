@@ -1,0 +1,49 @@
+{
+  "name": "mcp-worker-enhanced",
+  "version": "2.0.0",
+  "command": "node",
+  "args": [
+    "index-enhanced.js"
+  ],
+  "description": "MCP Worker Enhanced - Advanced Analytics & Reporting",
+  "env": {
+    "WORKER_ID": "${WORKER_ID}",
+    "TASK_ID": "${TASK_ID}",
+    "SESSION_ID": "${SESSION_ID}",
+    "WORKER_TYPE": "${WORKER_TYPE:-enhanced}",
+    "NATS_HOST": "${NATS_HOST:-localhost}",
+    "NATS_PORT": "${NATS_PORT:-4222}",
+    "REDIS_HOST": "${REDIS_HOST:-localhost}",
+    "REDIS_PORT": "${REDIS_PORT:-6379}",
+    "POSTGRES_HOST": "${POSTGRES_HOST:-localhost}",
+    "POSTGRES_PORT": "${POSTGRES_PORT:-5432}",
+    "POSTGRES_DB": "${POSTGRES_DB:-mcp_manager}",
+    "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
+    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}"
+  }
+}
+
+  "name": "mcp-worker-enhanced",
+  "version": "2.0.0",
+  "command": "node",
+  "args": [
+    "index-enhanced.js"
+  ],
+  "description": "MCP Worker Enhanced - Advanced Analytics & Reporting",
+  "env": {
+    "WORKER_ID": "${WORKER_ID}",
+    "TASK_ID": "${TASK_ID}",
+    "SESSION_ID": "${SESSION_ID}",
+    "WORKER_TYPE": "${WORKER_TYPE:-enhanced}",
+    "NATS_HOST": "${NATS_HOST:-localhost}",
+    "NATS_PORT": "${NATS_PORT:-4222}",
+    "REDIS_HOST": "${REDIS_HOST:-localhost}",
+    "REDIS_PORT": "${REDIS_PORT:-6379}",
+    "POSTGRES_HOST": "${POSTGRES_HOST:-localhost}",
+    "POSTGRES_PORT": "${POSTGRES_PORT:-5432}",
+    "POSTGRES_DB": "${POSTGRES_DB:-mcp_manager}",
+    "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
+    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}"
+  }
+}
+

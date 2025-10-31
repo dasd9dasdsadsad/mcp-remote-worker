@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  mcp-remote-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Unique container name - change for multiple instances
+    container_name: mcp-remote-worker-${WORKER_NUMBER:-1}
+    hostname: mcp-remote-worker-${WORKER_NUMBER:-1}
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Environment configuration
+    environment:
+      # ═══════════════════════════════════════════════════════════════
+      # REMOTE DEPLOYMENT CONFIGURATION
+      # ═══════════════════════════════════════════════════════════════
+      # IMPORTANT: Update these to point to your MCP Manager server!
+      
+      # Manager Server IP/Domain (REQUIRED - CHANGE THIS!)
+      - MANAGER_HOST=${MANAGER_HOST:-your.manager.server.ip}
+      
+      # Infrastructure Services
+      # By default, all services are assumed to be on MANAGER_HOST
+      # Override individually if services are on different servers
+      - NATS_HOST=${NATS_HOST:-${MANAGER_HOST:-your.manager.server.ip}}
+      - NATS_PORT=${NATS_PORT:-4222}
+      
+      - REDIS_HOST=${REDIS_HOST:-${MANAGER_HOST:-your.manager.server.ip}}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      
+      - POSTGRES_HOST=${POSTGRES_HOST:-${MANAGER_HOST:-your.manager.server.ip}}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-mcp_manager}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      
+      # ═══════════════════════════════════════════════════════════════
+      # WORKER CONFIGURATION
+      # ═══════════════════════════════════════════════════════════════
+      # Worker ID (leave empty for auto-generation)
+      - WORKER_ID=${WORKER_ID:-}
+      
+      # Worker tags for categorization
+      - WORKER_TAGS=${WORKER_TAGS:-mcp,docker,remote,enhanced,production}
+      
+      # ═══════════════════════════════════════════════════════════════
+      # CURSOR API KEY (REQUIRED!)
+      # ═══════════════════════════════════════════════════════════════
+      - CURSOR_API_KEY=${CURSOR_API_KEY:-key_YOUR_ACTUAL_KEY_HERE}
+      
+      # ═══════════════════════════════════════════════════════════════
+      # WORKER CAPABILITIES
+      # ═══════════════════════════════════════════════════════════════
+      - MAX_CONCURRENT_TASKS=${MAX_CONCURRENT_TASKS:-5}
+      - MAX_MEMORY_MB=${MAX_MEMORY_MB:-4096}
+      - HEARTBEAT_INTERVAL_MS=${HEARTBEAT_INTERVAL_MS:-10000}
+      
+      # ═══════════════════════════════════════════════════════════════
+      # MCP CONFIGURATION
+      # ═══════════════════════════════════════════════════════════════
+      - MCP_ENABLED=true
+      - MCP_SERVERS=mcp-worker,domlogger-unified
+      
+      # ═══════════════════════════════════════════════════════════════
+      # NODE ENVIRONMENT
+      # ═══════════════════════════════════════════════════════════════
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=4096
+    
+    # Network mode - MUST be bridge for remote deployment
+    network_mode: bridge
+    
+    # Port mappings (if worker exposes any services)
+    # ports:
+    #   - "8080:8080"  # Example: if worker runs a web server
+    
+    # Volume mounts
+    volumes:
+      # Worker logs
+      - worker-logs:/var/log/worker
+      
+      # Shared temp directory
+      - worker-temp:/tmp
+      
+      # Chrome data (for domlogger)
+      - chrome-data:/root/.config/chromium
+      
+      # MCP configuration (read-only)
+      - ./mcp-config.json:/root/.cursor/mcp.json:ro
+      
+      # Optional: Mount specific directories for file access
+      # - /path/on/host:/path/in/container:ro
+    
+    # Security options
+    security_opt:
+      - seccomp:unconfined  # Required for Chrome
+    
+    # Shared memory size (required for Chrome)
+    shm_size: 2gb
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "remote-worker-mcp-client.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '${WORKER_CPU_LIMIT:-2}'
+          memory: ${WORKER_MEMORY_LIMIT:-4G}
+        reservations:
+          cpus: '${WORKER_CPU_RESERVE:-0.5}'
+          memory: ${WORKER_MEMORY_RESERVE:-1G}
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  worker-logs:
+    driver: local
+  worker-temp:
+    driver: local
+  chrome-data:
+    driver: local
+
+# Networks (optional - for advanced networking)
+# networks:
+#   mcp-network:
+#     driver: bridge

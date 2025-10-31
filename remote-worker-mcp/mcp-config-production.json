@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "mcp-worker-enhanced": {
+      "command": "node",
+      "args": [
+        "/app/mcp-worker/index-enhanced.js"
+      ],
+      "env": {
+        "WORKER_TYPE": "enhanced",
+        "NATS_HOST": "${NATS_HOST:-165.232.134.47}",
+        "REDIS_HOST": "${REDIS_HOST:-165.232.134.47}",
+        "POSTGRES_HOST": "${POSTGRES_HOST:-165.232.134.47}"
+      },
+      "description": "MCP Worker Enhanced - Advanced Analytics & Reporting with 30+ tools"
+    },
+    "domlogger-unified": {
+      "command": "node",
+      "args": [
+        "/app/domlogger/server.js"
+      ],
+      "alwaysAllow": [
+        "*"
+      ],
+      "autoRun": true,
+      "description": "DOM Logger for web automation and monitoring - Enables browser automation, screenshot capture, and DOM analysis"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "mcp-manager-enhanced",
+  "version": "2.0.0",
+  "command": "node",
+  "args": [
+    "index-enhanced.js"
+  ],
+  "description": "MCP Manager Enhanced - Advanced Analytics & Real-time Monitoring",
+  "env": {
+    "MANAGER_HOST": "${MANAGER_HOST:-localhost}",
+    "NATS_HOST": "${NATS_HOST:-localhost}",
+    "NATS_PORT": "${NATS_PORT:-4222}",
+    "REDIS_HOST": "${REDIS_HOST:-localhost}",
+    "REDIS_PORT": "${REDIS_PORT:-6379}",
+    "POSTGRES_HOST": "${POSTGRES_HOST:-localhost}",
+    "POSTGRES_PORT": "${POSTGRES_PORT:-5432}",
+    "POSTGRES_DB": "${POSTGRES_DB:-mcp_manager}",
+    "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
+    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}"
+  }
+}
+
+  "name": "mcp-manager-enhanced",
+  "version": "2.0.0",
+  "command": "node",
+  "args": [
+    "index-enhanced.js"
+  ],
+  "description": "MCP Manager Enhanced - Advanced Analytics & Real-time Monitoring",
+  "env": {
+    "MANAGER_HOST": "${MANAGER_HOST:-localhost}",
+    "NATS_HOST": "${NATS_HOST:-localhost}",
+    "NATS_PORT": "${NATS_PORT:-4222}",
+    "REDIS_HOST": "${REDIS_HOST:-localhost}",
+    "REDIS_PORT": "${REDIS_PORT:-6379}",
+    "POSTGRES_HOST": "${POSTGRES_HOST:-localhost}",
+    "POSTGRES_PORT": "${POSTGRES_PORT:-5432}",
+    "POSTGRES_DB": "${POSTGRES_DB:-mcp_manager}",
+    "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
+    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}"
+  }
+}
+
