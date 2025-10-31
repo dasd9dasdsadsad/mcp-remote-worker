@@ -1,0 +1,207 @@
+name: 🐛 Debug Workers (Interactive SSH Shell)
+
+on:
+  workflow_dispatch:
+    inputs:
+      num_workers:
+        description: 'Number of workers to spawn'
+        required: false
+        default: '2'
+
+env:
+  MANAGER_HOST: 165.232.134.47
+  NATS_HOST: 165.232.134.47
+  NATS_PORT: 4222
+  REDIS_HOST: 165.232.134.47
+  REDIS_PORT: 6379
+  POSTGRES_HOST: 165.232.134.47
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: mcp_manager
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
+
+jobs:
+  debug-interactive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max (GitHub Actions limit)
+    
+    steps:
+      - name: 🔍 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: test123434sdd
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: 🌐 Test Connectivity
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🌐 Testing Connection to 165.232.134.47"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          
+          # Test all ports
+          for port in 4222 6379 5432; do
+            if nc -zv -w5 ${{ env.MANAGER_HOST }} $port 2>&1; then
+              echo "✅ Port $port: Connected"
+            else
+              echo "⚠️ Port $port: Cannot connect"
+            fi
+          done
+          
+          echo ""
+          echo "✅ Connectivity tests complete"
+
+      - name: 🐳 Pull Worker Image
+        run: |
+          echo "📥 Pulling worker Docker image..."
+          docker pull ${{ env.DOCKER_IMAGE }}
+          echo "✅ Image pulled"
+
+      - name: 🧹 Cleanup Old Containers
+        run: |
+          echo "🧹 Cleaning up any old containers..."
+          docker ps -a | grep github-worker | awk '{print $1}' | xargs -r docker rm -f || echo "No old containers"
+          echo "✅ Cleanup complete"
+
+      - name: 🚀 Spawn Workers
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Spawning ${{ github.event.inputs.num_workers }} Workers"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          
+          NUM_WORKERS=${{ github.event.inputs.num_workers }}
+          RUN_ID="${{ github.run_id }}"
+          
+          for i in $(seq 1 $NUM_WORKERS); do
+            WORKER_NAME="github-worker-${RUN_ID}-$i"
+            WORKER_ID="github-debug-worker-${RUN_ID}-$i"
+            
+            echo "🔧 Starting Worker $i/$NUM_WORKERS"
+            echo "   Name: $WORKER_NAME"
+            echo "   ID: $WORKER_ID"
+            
+            docker run -d \
+              --name $WORKER_NAME \
+              -e WORKER_ID="$WORKER_ID" \
+              -e WORKER_TAGS="github-actions,debug,interactive,run-$RUN_ID" \
+              -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+              -e NATS_HOST="${{ env.NATS_HOST }}" \
+              -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+              -e REDIS_PASSWORD="" \
+              -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+              -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+              -v /tmp/screenshots-$i:/root \
+              ${{ env.DOCKER_IMAGE }}
+            
+            echo "   ✅ Worker $i started"
+            echo ""
+            
+            sleep 2
+          done
+          
+          echo "✅ All workers spawned!"
+          echo ""
+          echo "📊 Running containers:"
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+
+      - name: 📋 Show Initial Worker Logs
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "📋 Initial Worker Logs"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          
+          for container in $(docker ps --format "{{.Names}}" | grep github-worker); do
+            echo "───────────────────────────────────────────────────"
+            echo "Worker: $container"
+            echo "───────────────────────────────────────────────────"
+            docker logs --tail 30 $container 2>&1
+            echo ""
+          done
+
+      - name: 🐛 Setup tmate SSH Session (INTERACTIVE DEBUG)
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: false  # Allow anyone with the link to connect
+          timeout-minutes: 300  # 5 hours timeout for SSH session
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📊 Final Status
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "📊 Final Status"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          
+          echo "🐳 Running containers:"
+          docker ps --format "table {{.Names}}\t{{.Status}}"
+          echo ""
+          
+          echo "📋 Worker logs (last 50 lines each):"
+          for container in $(docker ps --format "{{.Names}}" | grep github-worker); do
+            echo ""
+            echo "───── $container ─────"
+            docker logs --tail 50 $container 2>&1
+          done
+
+      - name: 🛑 Cleanup
+        if: always()
+        run: |
+          echo "🛑 Stopping and removing workers..."
+          docker ps -a | grep github-worker | awk '{print $1}' | xargs -r docker rm -f
+          echo "✅ Cleanup complete"
+
+      - name: 📝 Generate Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🐛 Interactive Debug Session Complete
+          
+          ### 🎯 What This Workflow Did
+          
+          1. ✅ Connected to your server (165.232.134.47)
+          2. ✅ Pulled worker Docker image
+          3. ✅ Spawned workers
+          4. ✅ Opened interactive SSH session via tmate
+          5. ✅ Allowed real-time debugging
+          
+          ### 🔧 Debugging Commands You Could Use
+          
+          ```bash
+          # View running containers
+          docker ps
+          
+          # Check worker logs
+          docker logs github-worker-{RUN_ID}-1
+          
+          # Follow worker logs in real-time
+          docker logs -f github-worker-{RUN_ID}-1
+          
+          # Exec into worker container
+          docker exec -it github-worker-{RUN_ID}-1 bash
+          
+          # Check worker's NATS connection
+          docker exec github-worker-{RUN_ID}-1 nc -zv 165.232.134.47 4222
+          
+          # Test manually sending task via NATS
+          # (requires nats-cli or custom script)
+          
+          # Check system resources
+          docker stats
+          
+          # View all logs at once
+          docker-compose logs -f  # if using compose
+          ```
+          
+          ### 💡 Next Time
+          
+          To debug again, just trigger this workflow and you'll get an SSH link!
+          EOF
+
