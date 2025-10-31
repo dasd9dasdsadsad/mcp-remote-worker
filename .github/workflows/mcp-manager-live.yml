@@ -123,7 +123,7 @@ jobs:
               -e REDIS_PASSWORD="" \
               -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
               -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
-              -v /tmp/screenshots-$i:/root \
+              -v /tmp/screenshots-$i:/screenshots \
               ${{ env.DOCKER_IMAGE }}
             
             echo "   ✅ Worker $i started (Container ID: $(docker ps -q -f name=$WORKER_NAME))"
@@ -297,7 +297,7 @@ jobs:
               -d ${{ env.POSTGRES_DB }} \
               -c "SELECT 
                     (SELECT COUNT(*) FROM tasks) as tasks,
-                    (SELECT COUNT(*) FROM workers) as workers;" \
+                    (SELECT COUNT(*) FROM remote_workers) as workers;" \
               2>/dev/null || echo "   Database query failed"
             
             sleep 30
@@ -319,7 +319,7 @@ jobs:
             -d ${{ env.POSTGRES_DB }} \
             -t -c "SELECT 
                      (SELECT COUNT(*) FROM tasks) || ' tasks, ' ||
-                     (SELECT COUNT(*) FROM workers) || ' workers';" \
+                     (SELECT COUNT(*) FROM remote_workers) || ' workers';" \
             2>/dev/null || echo "N/A")
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
@@ -371,7 +371,7 @@ jobs:
           
           ### 💡 Next Steps
           
-          - Check your database: \`SELECT * FROM workers WHERE tags LIKE '%github-actions%';\`
+          - Check your database: \`SELECT * FROM remote_workers WHERE tags LIKE '%github-actions%';\`
           - Assign tasks: Use MCP Manager tools to assign work to GitHub workers
           - Scale up: Run more workflows in parallel for more workers
           - Mix & match: Run some workers on your server, some on GitHub Actions!
