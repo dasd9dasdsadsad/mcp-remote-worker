@@ -1,4 +1,4 @@
-name: MCP Manager + Workers (Connected to 165.232.134.47)
+name: Spawn Workers Only (Connect to 165.232.134.47)
 
 on:
   workflow_dispatch:  # Manual trigger only
@@ -26,7 +26,7 @@ env:
   DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
 
 jobs:
-  run-mcp-manager-and-workers:
+  spawn-workers:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     
@@ -74,61 +74,18 @@ jobs:
           echo ""
           echo "✅ All services accessible from GitHub Actions!"
 
-      - name: 📦 Install Dependencies
-        run: |
-          cd mcp-manager
-          npm install
-
-      - name: 🎯 Start MCP Manager (Connected to Your Server)
-        run: |
-          echo "═══════════════════════════════════════════════════════"
-          echo "🚀 Starting MCP Manager Connected to 165.232.134.47"
-          echo "═══════════════════════════════════════════════════════"
-          echo ""
-          echo "🔗 Connecting to YOUR infrastructure:"
-          echo "  - NATS:       ${{ env.NATS_HOST }}:${{ env.NATS_PORT }}"
-          echo "  - Redis:      ${{ env.REDIS_HOST }}:${{ env.REDIS_PORT }}"
-          echo "  - PostgreSQL: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}"
-          echo ""
-          echo "💾 All data will be saved to YOUR database!"
-          echo ""
-          
-          cd mcp-manager
-          
-          # Start MCP Manager with remote connections
-          NATS_HOST=${{ env.NATS_HOST }} \
-          NATS_PORT=${{ env.NATS_PORT }} \
-          REDIS_HOST=${{ env.REDIS_HOST }} \
-          REDIS_PORT=${{ env.REDIS_PORT }} \
-          POSTGRES_HOST=${{ env.POSTGRES_HOST }} \
-          POSTGRES_PORT=${{ env.POSTGRES_PORT }} \
-          POSTGRES_DB=${{ env.POSTGRES_DB }} \
-          POSTGRES_USER=${{ env.POSTGRES_USER }} \
-          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }} \
-          node index-enhanced.js > /tmp/mcp-manager.log 2>&1 &
-          
-          MCP_PID=$!
-          echo $MCP_PID > /tmp/mcp-manager.pid
-          
-          echo "⏳ Waiting for MCP Manager to connect..."
-          sleep 10
-          
-          # Check if it's running
-          if ps -p $MCP_PID > /dev/null; then
-            echo "✅ MCP Manager started and connected!"
-            echo "   PID: $MCP_PID"
-            echo ""
-            echo "📋 Initial logs:"
-            head -30 /tmp/mcp-manager.log
-          else
-            echo "❌ MCP Manager failed to start!"
-            cat /tmp/mcp-manager.log
-            exit 1
-          fi
-
       - name: 🐳 Pull Worker Docker Image
         run: |
-          echo "📥 Pulling worker image..."
+          echo "═══════════════════════════════════════════════════════"
+          echo "📥 Pulling Worker Docker Image"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          echo "Workers will connect to YOUR MCP Manager at:"
+          echo "  - Manager: 165.232.134.47"
+          echo "  - NATS:    165.232.134.47:4222"
+          echo "  - Redis:   165.232.134.47:6379"
+          echo "  - PostgreSQL: 165.232.134.47:5432"
+          echo ""
           docker pull ${{ env.DOCKER_IMAGE }}
           echo "✅ Image pulled"
 
@@ -292,73 +249,59 @@ jobs:
           echo ""
           echo "═══════════════════════════════════════════════════════"
 
-      - name: 🔴 Keep System Running
+      - name: 🔴 Keep Workers Running
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "🔴 MCP System is LIVE (Connected to Your Server)"
+          echo "🔴 Workers Running (Connected to 165.232.134.47)"
           echo "═══════════════════════════════════════════════════════"
           echo ""
           echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
-          echo "🔗 Using infrastructure at: 165.232.134.47"
+          echo "🔗 Connected to YOUR MCP Manager at: 165.232.134.47"
           echo "💾 All data saved to YOUR database!"
           echo ""
           
-          MCP_PID=$(cat /tmp/mcp-manager.pid)
           RUNTIME_SECONDS=$(($(echo "${{ github.event.inputs.runtime_minutes }}" | bc) * 60))
           END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
           
           while [ $(date +%s) -lt $END_TIME ]; do
-            if ps -p $MCP_PID > /dev/null; then
-              echo ""
-              echo "═══════════════════════════════════════════════════════"
-              echo "📊 Status Update - $(date '+%Y-%m-%d %H:%M:%S')"
-              echo "═══════════════════════════════════════════════════════"
-              
-              # Show MCP Manager status
-              echo "🎯 MCP Manager:"
-              ps -p $MCP_PID -o pid,%cpu,%mem,etime | tail -1
-              
-              # Show workers status
-              echo ""
-              echo "👷 Workers:"
-              docker ps --format "   {{.Names}}: {{.Status}}" | grep github-worker || echo "   No workers running"
-              
-              # Show worker logs sample
-              echo ""
-              echo "📋 Recent Worker Activity:"
-              for container in $(docker ps --format "{{.Names}}" | grep github-worker | head -3); do
-                echo "   [$container]:"
-                docker logs --tail 3 $container 2>&1 | sed 's/^/     /'
-              done
-              
-              # Show database stats from YOUR server
-              echo ""
-              echo "📊 Database Stats (Your Server):"
-              PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql \
-                -h ${{ env.POSTGRES_HOST }} \
-                -U ${{ env.POSTGRES_USER }} \
-                -d ${{ env.POSTGRES_DB }} \
-                -c "SELECT 
-                      (SELECT COUNT(*) FROM tasks) as tasks,
-                      (SELECT COUNT(*) FROM workers) as workers,
-                      (SELECT COUNT(*) FROM analytics) as analytics;" \
-                2>/dev/null || echo "   Database query failed"
-              
-              sleep 30
-            else
-              echo "❌ MCP Manager died!"
-              cat /tmp/mcp-manager.log
-              exit 1
-            fi
+            echo ""
+            echo "═══════════════════════════════════════════════════════"
+            echo "📊 Status Update - $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "═══════════════════════════════════════════════════════"
+            
+            # Show workers status
+            echo "👷 Workers on GitHub Actions:"
+            docker ps --format "   {{.Names}}: {{.Status}}" | grep github-worker || echo "   ⚠️ No workers running"
+            
+            # Show worker logs sample
+            echo ""
+            echo "📋 Recent Worker Activity:"
+            for container in $(docker ps --format "{{.Names}}" | grep github-worker | head -3); do
+              echo "   [$container]:"
+              docker logs --tail 3 $container 2>&1 | sed 's/^/     /' || echo "     (no logs)"
+            done
+            
+            # Show database stats from YOUR server
+            echo ""
+            echo "📊 Database Stats (Your Server 165.232.134.47):"
+            PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql \
+              -h ${{ env.POSTGRES_HOST }} \
+              -U ${{ env.POSTGRES_USER }} \
+              -d ${{ env.POSTGRES_DB }} \
+              -c "SELECT 
+                    (SELECT COUNT(*) FROM tasks) as tasks,
+                    (SELECT COUNT(*) FROM workers) as workers;" \
+              2>/dev/null || echo "   Database query failed"
+            
+            sleep 30
           done
           
           echo ""
-          echo "⏱️  Runtime limit reached. Shutting down gracefully..."
+          echo "⏱️  Runtime limit reached. Shutting down workers..."
 
       - name: 📝 Generate Summary
         if: always()
         run: |
-          LOGS=$(tail -200 /tmp/mcp-manager.log 2>/dev/null || echo "No logs available")
           RUNTIME=$SECONDS
           NUM_WORKERS=${{ github.event.inputs.num_workers }}
           
@@ -369,27 +312,26 @@ jobs:
             -d ${{ env.POSTGRES_DB }} \
             -t -c "SELECT 
                      (SELECT COUNT(*) FROM tasks) || ' tasks, ' ||
-                     (SELECT COUNT(*) FROM workers) || ' workers, ' ||
-                     (SELECT COUNT(*) FROM analytics) || ' analytics';" \
+                     (SELECT COUNT(*) FROM workers) || ' workers';" \
             2>/dev/null || echo "N/A")
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## 🎊 MCP System Session Complete!
+          ## 🎊 GitHub Actions Workers Session Complete!
           
           ### 📦 Deployment Details
           - **Runtime**: ${RUNTIME} seconds (${{ github.event.inputs.runtime_minutes }} min configured)
-          - **Mode**: 🔗 Hybrid (GitHub compute + Your server data)
+          - **Mode**: 🔗 Hybrid (GitHub compute + Your server data/management)
           - **Workers Spawned**: ${NUM_WORKERS}
           - **Status**: Completed successfully ✅
           
           ### 🏗️ Architecture Used
           
           **GitHub Actions (Compute Layer)**:
-          - ✅ MCP Manager process
           - ✅ ${NUM_WORKERS} Docker worker containers
-          - ✅ All connected to your server
+          - ✅ All connected to your MCP Manager
           
-          **Your Server 165.232.134.47 (Data Layer)**:
+          **Your Server 165.232.134.47 (Management + Data Layer)**:
+          - ✅ MCP Manager (always running on your server)
           - ✅ NATS (4222) - Message bus
           - ✅ Redis (6379) - Cache
           - ✅ PostgreSQL (5432) - Database
@@ -399,44 +341,40 @@ jobs:
           
           Final stats: ${FINAL_STATS}
           
-          All tasks, worker registrations, analytics, and execution data 
-          were saved to YOUR PostgreSQL database and are still there!
+          All worker registrations, tasks, and analytics were saved to 
+          YOUR PostgreSQL database at 165.232.134.47 and are still there!
           
           ### ✅ Benefits of This Setup
           
-          1. **Scalable compute**: Spawn workers on GitHub Actions
-          2. **Persistent data**: Everything saved to your server
-          3. **No data loss**: Database survives after workflow ends
-          4. **Cost effective**: Use free GitHub Actions compute
-          5. **Centralized data**: All data in one place (165.232.134.47)
+          1. **Scalable compute**: Spawn workers on GitHub Actions (free!)
+          2. **Centralized management**: MCP Manager on your server
+          3. **Persistent data**: Everything saved to your database
+          4. **No data loss**: Workers can come and go, data stays
+          5. **Cost effective**: Use free GitHub Actions compute, pay only for your server
           
           ### 📊 What Happened
           
-          1. ✅ MCP Manager connected to your NATS/Redis/PostgreSQL
-          2. ✅ Spawned ${NUM_WORKERS} workers on GitHub Actions
-          3. ✅ Workers connected to your infrastructure
-          4. ✅ All data written to your database
-          5. ✅ Workers processed tasks (if assigned)
-          6. ✅ Analytics captured and stored
-          
-          ### 📋 Manager Logs (Last 200 Lines)
-          \`\`\`
-          $LOGS
-          \`\`\`
+          1. ✅ Tested connectivity to your server (165.232.134.47)
+          2. ✅ Pulled worker Docker image
+          3. ✅ Spawned ${NUM_WORKERS} workers on GitHub Actions
+          4. ✅ Workers connected to YOUR MCP Manager
+          5. ✅ Workers registered in YOUR database
+          6. ✅ Workers ready to process tasks
+          7. ✅ All data saved to YOUR infrastructure
           
           ### 💡 Next Steps
           
-          - Check your database: All data is preserved!
-          - Run again: Spawn more workers anytime
-          - Scale up: Increase num_workers for more capacity
-          - Your server has ALL the historical data!
+          - Check your database: \`SELECT * FROM workers WHERE tags LIKE '%github-actions%';\`
+          - Assign tasks: Use MCP Manager tools to assign work to GitHub workers
+          - Scale up: Run more workflows in parallel for more workers
+          - Mix & match: Run some workers on your server, some on GitHub Actions!
           EOF
 
       - name: 🛑 Cleanup
         if: always()
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "🛑 Cleanup (Workers and Manager)"
+          echo "🛑 Cleanup (Workers Only)"
           echo "═══════════════════════════════════════════════════════"
           
           # Stop workers
@@ -444,14 +382,15 @@ jobs:
           docker ps --format "{{.Names}}" | grep github-worker | xargs -r docker stop
           docker ps -a --format "{{.Names}}" | grep github-worker | xargs -r docker rm
           
-          # Stop MCP Manager
-          echo "Stopping MCP Manager..."
-          kill $(cat /tmp/mcp-manager.pid 2>/dev/null) 2>/dev/null || true
-          
           echo ""
-          echo "✅ Cleanup complete!"
+          echo "✅ Workers stopped and removed!"
           echo ""
-          echo "💾 Your server infrastructure (165.232.134.47) is still running"
+          echo "💾 Your server infrastructure (165.232.134.47) is STILL running:"
+          echo "   - MCP Manager ✅"
+          echo "   - NATS ✅"
+          echo "   - Redis ✅"
+          echo "   - PostgreSQL ✅"
+          echo ""
           echo "📊 All data is preserved in your database!"
           echo ""
 
