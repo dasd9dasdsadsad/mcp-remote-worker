@@ -89,6 +89,12 @@ jobs:
           docker pull ${{ env.DOCKER_IMAGE }}
           echo "✅ Image pulled"
 
+      - name: 🧹 Cleanup Old Containers
+        run: |
+          echo "🧹 Cleaning up any old GitHub worker containers..."
+          docker ps -a | grep github-worker | awk '{print $1}' | xargs -r docker rm -f || echo "No old containers to clean"
+          echo "✅ Cleanup complete"
+
       - name: 🚀 Spawn Multiple Workers
         run: |
           echo "═══════════════════════════════════════════════════════"
@@ -97,10 +103,11 @@ jobs:
           echo ""
           
           NUM_WORKERS=${{ github.event.inputs.num_workers }}
+          RUN_ID="${{ github.run_id }}"
           
           for i in $(seq 1 $NUM_WORKERS); do
-            WORKER_NAME="github-worker-$i"
-            WORKER_ID="github-actions-worker-$i-$(date +%s)"
+            WORKER_NAME="github-worker-${RUN_ID}-$i"
+            WORKER_ID="github-actions-worker-${RUN_ID}-$i"
             
             echo "🔧 Starting Worker $i/$NUM_WORKERS"
             echo "   Name: $WORKER_NAME"
@@ -109,7 +116,7 @@ jobs:
             docker run -d \
               --name $WORKER_NAME \
               -e WORKER_ID="$WORKER_ID" \
-              -e WORKER_TAGS="github-actions,worker-$i,automated" \
+              -e WORKER_TAGS="github-actions,worker-$i,run-$RUN_ID" \
               -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
               -e NATS_HOST="${{ env.NATS_HOST }}" \
               -e REDIS_HOST="${{ env.REDIS_HOST }}" \
