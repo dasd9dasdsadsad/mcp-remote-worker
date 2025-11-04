@@ -1,0 +1,109 @@
+name: Test Single Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_minutes:
+        description: 'Runtime in minutes'
+        required: false
+        default: '10'
+
+env:
+  MANAGER_HOST: 165.232.134.47
+  NATS_HOST: 165.232.134.47
+  NATS_PORT: 4222
+  REDIS_HOST: 165.232.134.47
+  REDIS_PORT: 6379
+  POSTGRES_HOST: 165.232.134.47
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: mcp_manager
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
+
+jobs:
+  spawn-single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔐 Docker Hub Login
+        run: |
+          echo "Logging in to Docker Hub..."
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u test123434sdd --password-stdin
+
+      - name: 📥 Pull Docker Image
+        run: |
+          echo "Pulling Docker image..."
+          docker pull ${{ env.DOCKER_IMAGE }}
+
+      - name: 🚀 Spawn Single Worker
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "🚀 Spawning 1 Test Worker"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          WORKER_NAME="test-worker-${{ github.run_id }}"
+          WORKER_ID="github-worker-${{ github.run_id }}-test-1"
+          
+          echo "Starting Worker: $WORKER_ID"
+          
+          docker run -d \
+            --name $WORKER_NAME \
+            -e WORKER_ID="$WORKER_ID" \
+            -e WORKER_TAGS="github,test,single-worker" \
+            -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+            -e NATS_HOST="${{ env.NATS_HOST }}" \
+            -e NATS_PORT="${{ env.NATS_PORT }}" \
+            -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+            -e REDIS_PORT="${{ env.REDIS_PORT }}" \
+            -e REDIS_PASSWORD="" \
+            -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+            -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
+            -e POSTGRES_DB="${{ env.POSTGRES_DB }}" \
+            -e POSTGRES_USER="${{ env.POSTGRES_USER }}" \
+            -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+            ${{ env.DOCKER_IMAGE }}
+          
+          echo "✅ Worker spawned"
+          
+          # Show running containers
+          docker ps --format "table {{.Names}}\t{{.Status}}"
+
+      - name: 🔴 Keep Worker Running
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "🔴 Test Worker Running"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          RUNTIME_SECONDS=$(( ${{ github.event.inputs.runtime_minutes }} * 60 ))
+          END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
+          
+          echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
+          echo "🔗 Manager: ${{ env.MANAGER_HOST }}"
+          echo "👷 Worker ID: github-worker-${{ github.run_id }}-test-1"
+          echo ""
+          
+          while [ $(date +%s) -lt $END_TIME ]; do
+            RUNNING=$(docker ps -q -f name="test-worker-${{ github.run_id }}" | wc -l)
+            echo "[$(date '+%H:%M:%S')] Worker status: $RUNNING/1 running"
+            
+            # Show worker logs
+            docker logs test-worker-${{ github.run_id }} --tail 5 2>&1 | grep -E "✅|📨|🚀" || true
+            
+            sleep 30
+          done
+          
+          echo "⏱️  Runtime complete"
+
+      - name: 🛑 Cleanup
+        if: always()
+        run: |
+          echo "🛑 Stopping worker..."
+          docker ps -q -f name="test-worker-${{ github.run_id }}" | xargs -r docker stop
+          docker ps -aq -f name="test-worker-${{ github.run_id }}" | xargs -r docker rm
+          echo "✅ Cleanup complete"
+
