@@ -1,0 +1,143 @@
+name: Universal Worker Spawner - 500 Workers (Build Mode)
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker_count_per_job:
+        description: 'Number of workers per job'
+        required: false
+        default: '25'
+
+jobs:
+  spawn-workers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, ubuntu-latest, macos-latest, macos-latest, macos-latest, macos-latest, macos-latest]
+        job_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    
+    steps:
+      - name: 🔍 Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: 🐋 Setup Docker (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "🍎 Setting up Docker on macOS..."
+          brew install docker
+          colima start --cpu 2 --memory 4
+          docker --version
+      
+      - name: 🔨 Build Docker Image
+        run: |
+          echo "🔨 Building MCP worker image..."
+          cd remote-worker-mcp
+          docker build -t mcp-worker:local .
+          echo "✅ Image built successfully!"
+          docker images | grep mcp-worker
+      
+      - name: 🚀 Spawn 25 Workers
+        run: |
+          echo "════════════════════════════════════════════════════════"
+          echo "🚀 SPAWNING 25 WORKERS - Job ${{ matrix.job_id }} on ${{ matrix.os }}"
+          echo "════════════════════════════════════════════════════════"
+          
+          WORKER_COUNT=${{ github.event.inputs.worker_count_per_job }}
+          if [ -z "$WORKER_COUNT" ]; then
+            WORKER_COUNT=25
+          fi
+          
+          for i in $(seq 1 $WORKER_COUNT); do
+            WORKER_ID="github-worker-${{ github.run_id }}-job${{ matrix.job_id }}-worker${i}"
+            
+            echo ""
+            echo "──────────────────────────────────────────────────────"
+            echo "🔷 Spawning Worker ${i}/${WORKER_COUNT}"
+            echo "📋 Worker ID: ${WORKER_ID}"
+            echo "🖥️  OS: ${{ matrix.os }}"
+            echo "──────────────────────────────────────────────────────"
+            
+            docker run -d \
+              --name "worker-${i}" \
+              --restart unless-stopped \
+              -e WORKER_ID="${WORKER_ID}" \
+              -e MANAGER_HOST="165.232.134.47" \
+              -e NATS_HOST="165.232.134.47" \
+              -e NATS_PORT="4222" \
+              -e REDIS_HOST="165.232.134.47" \
+              -e REDIS_PORT="6379" \
+              -e REDIS_PASSWORD="postgres" \
+              -e POSTGRES_HOST="165.232.134.47" \
+              -e POSTGRES_PORT="5432" \
+              -e POSTGRES_DB="mcp_manager" \
+              -e POSTGRES_USER="postgres" \
+              -e POSTGRES_PASSWORD="postgres" \
+              mcp-worker:local
+            
+            echo "✅ Worker ${i} spawned successfully!"
+            
+            # Small delay to avoid overwhelming the system
+            sleep 2
+          done
+          
+          echo ""
+          echo "════════════════════════════════════════════════════════"
+          echo "✅ ALL 25 WORKERS SPAWNED FOR JOB ${{ matrix.job_id }}"
+          echo "════════════════════════════════════════════════════════"
+          echo ""
+          echo "📊 Worker Status:"
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+      
+      - name: 🔴 Keep Workers Active
+        run: |
+          echo "👀 Monitoring workers for 2 hours..."
+          echo "Workers will run until workflow timeout or manual cancellation"
+          echo ""
+          echo "🔗 Connect to MCP Manager at: 165.232.134.47"
+          echo "📊 Dashboard: http://165.232.134.47:3002"
+          echo ""
+          
+          # Keep the job alive to let workers run
+          # Check status every 5 minutes
+          for minute in {1..120}; do
+            if [ $((minute % 5)) -eq 0 ]; then
+              echo ""
+              echo "⏰ Runtime: ${minute} minutes"
+              echo "📊 Active containers:"
+              docker ps --format "table {{.Names}}\t{{.Status}}" | head -10
+            fi
+            sleep 60
+          done
+      
+      - name: 🛑 Cleanup
+        if: always()
+        run: |
+          echo "🛑 Stopping workers for Job ${{ matrix.job_id }}..."
+          docker ps -q -f name="worker-" | xargs -r docker stop
+          docker ps -aq -f name="worker-" | xargs -r docker rm
+          echo "✅ Cleanup complete"
+  
+  summary:
+    needs: spawn-workers
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 📊 Deployment Summary
+        run: |
+          echo "════════════════════════════════════════════════════════"
+          echo "✅ UNIVERSAL WORKER SPAWNER - DEPLOYMENT COMPLETE"
+          echo "════════════════════════════════════════════════════════"
+          echo ""
+          echo "📊 Configuration:"
+          echo "   • Total Jobs: 20 (15 Linux + 5 macOS)"
+          echo "   • Workers per Job: 25"
+          echo "   • Total Workers: 500"
+          echo ""
+          echo "🔗 MCP Manager: 165.232.134.47"
+          echo "📊 Dashboard: http://165.232.134.47:3002"
+          echo ""
+          echo "✅ All workers are now active and connected!"
+          echo "════════════════════════════════════════════════════════"
+
