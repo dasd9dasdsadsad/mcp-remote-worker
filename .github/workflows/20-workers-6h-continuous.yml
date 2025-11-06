@@ -1,0 +1,216 @@
+name: 20 Workers - 6 Hour Continuous Processing
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker_prefix:
+        description: 'Worker name prefix'
+        required: false
+        default: 'continuous'
+
+env:
+  MANAGER_HOST: 165.232.134.47
+  NATS_HOST: 165.232.134.47
+  NATS_PORT: 4222
+  REDIS_HOST: 165.232.134.47
+  REDIS_PORT: 6379
+  POSTGRES_HOST: 165.232.134.47
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: mcp_manager
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
+
+jobs:
+  spawn-workers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours - Maximum GitHub Actions allows
+    
+    strategy:
+      matrix:
+        worker_number: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+      fail-fast: false  # Continue other workers even if one fails
+      max-parallel: 20   # Run all 20 workers in parallel
+    
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔐 Docker Hub Login
+        run: |
+          echo "🔐 Logging in to Docker Hub..."
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u test123434sdd --password-stdin
+
+      - name: 📥 Pull Docker Image
+        run: |
+          echo "📥 Pulling Docker image..."
+          docker pull ${{ env.DOCKER_IMAGE }}
+
+      - name: 🚀 Spawn Worker ${{ matrix.worker_number }}
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "🚀 Spawning Worker ${{ matrix.worker_number }}/20"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          WORKER_NAME="${{ github.event.inputs.worker_prefix }}-worker-${{ github.run_id }}-${{ matrix.worker_number }}"
+          WORKER_ID="github-${{ github.event.inputs.worker_prefix }}-${{ github.run_id }}-w${{ matrix.worker_number }}"
+          
+          echo "Worker Name: $WORKER_NAME"
+          echo "Worker ID:   $WORKER_ID"
+          echo "Manager:     ${{ env.MANAGER_HOST }}"
+          echo "Runtime:     6 hours (continuous task processing)"
+          echo ""
+          
+          docker run -d \
+            --name $WORKER_NAME \
+            -e WORKER_ID="$WORKER_ID" \
+            -e WORKER_TAGS="github,production,continuous,6h-runtime,worker-${{ matrix.worker_number }}" \
+            -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+            -e NATS_HOST="${{ env.NATS_HOST }}" \
+            -e NATS_PORT="${{ env.NATS_PORT }}" \
+            -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+            -e REDIS_PORT="${{ env.REDIS_PORT }}" \
+            -e REDIS_PASSWORD="" \
+            -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+            -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
+            -e POSTGRES_DB="${{ env.POSTGRES_DB }}" \
+            -e POSTGRES_USER="${{ env.POSTGRES_USER }}" \
+            -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+            -e MAX_CONCURRENT_TASKS="5" \
+            -e HEARTBEAT_INTERVAL_MS="10000" \
+            ${{ env.DOCKER_IMAGE }}
+          
+          echo "✅ Worker ${{ matrix.worker_number }} spawned and registered"
+          
+          # Wait for worker to start
+          sleep 5
+          
+          # Verify worker is running
+          if docker ps -q -f name="$WORKER_NAME" | grep -q .; then
+            echo "✅ Worker ${{ matrix.worker_number }} is running"
+            docker logs $WORKER_NAME --tail 10
+          else
+            echo "❌ Worker ${{ matrix.worker_number }} failed to start"
+            exit 1
+          fi
+
+      - name: 🔄 Continuous Task Processing - 6 Hours
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "🔄 Worker ${{ matrix.worker_number }} - Continuous Processing"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          WORKER_NAME="${{ github.event.inputs.worker_prefix }}-worker-${{ github.run_id }}-${{ matrix.worker_number }}"
+          WORKER_ID="github-${{ github.event.inputs.worker_prefix }}-${{ github.run_id }}-w${{ matrix.worker_number }}"
+          
+          echo "⏱️  Runtime: 6 hours (360 minutes)"
+          echo "🔗 Manager: ${{ env.MANAGER_HOST }}"
+          echo "👷 Worker ID: $WORKER_ID"
+          echo "📊 Status: READY FOR TASKS"
+          echo ""
+          echo "🎯 This worker will continuously process tasks until:"
+          echo "   - Job timeout (6 hours)"
+          echo "   - Manual cancellation"
+          echo "   - Worker crash"
+          echo ""
+          
+          # Calculate end time (6 hours = 21600 seconds)
+          END_TIME=$(($(date +%s) + 21600))
+          CHECK_COUNT=0
+          
+          # Continuous monitoring loop
+          while [ $(date +%s) -lt $END_TIME ]; do
+            CHECK_COUNT=$((CHECK_COUNT + 1))
+            CURRENT_TIME=$(date '+%H:%M:%S')
+            ELAPSED_MINUTES=$(( ($(date +%s) - (END_TIME - 21600)) / 60 ))
+            REMAINING_MINUTES=$(( (END_TIME - $(date +%s)) / 60 ))
+            
+            # Check if worker is still running
+            if ! docker ps -q -f name="$WORKER_NAME" | grep -q .; then
+              echo "❌ [$CURRENT_TIME] Worker ${{ matrix.worker_number }} stopped unexpectedly!"
+              echo "🔄 Attempting to restart worker..."
+              
+              docker run -d \
+                --name $WORKER_NAME \
+                -e WORKER_ID="$WORKER_ID" \
+                -e WORKER_TAGS="github,production,continuous,restarted" \
+                -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
+                -e NATS_HOST="${{ env.NATS_HOST }}" \
+                -e NATS_PORT="${{ env.NATS_PORT }}" \
+                -e REDIS_HOST="${{ env.REDIS_HOST }}" \
+                -e REDIS_PORT="${{ env.REDIS_PORT }}" \
+                -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
+                -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
+                -e POSTGRES_DB="${{ env.POSTGRES_DB }}" \
+                -e POSTGRES_USER="${{ env.POSTGRES_USER }}" \
+                -e POSTGRES_PASSWORD="${{ env.POSTGRES_PASSWORD }}" \
+                ${{ env.DOCKER_IMAGE }}
+              
+              echo "✅ Worker ${{ matrix.worker_number }} restarted"
+            fi
+            
+            # Status update every 2 minutes
+            if [ $((CHECK_COUNT % 4)) -eq 0 ]; then
+              echo "[$CURRENT_TIME] Worker ${{ matrix.worker_number }} | ⏱️  Elapsed: ${ELAPSED_MINUTES}m | ⏳ Remaining: ${REMAINING_MINUTES}m | Status: ACTIVE"
+            fi
+            
+            # Show recent activity every 10 minutes
+            if [ $((CHECK_COUNT % 20)) -eq 0 ]; then
+              echo ""
+              echo "📊 Worker ${{ matrix.worker_number }} Recent Activity:"
+              docker logs $WORKER_NAME --tail 15 2>&1 | grep -E "✅|📨|🎯|Task|Question" || echo "  (No recent task activity)"
+              echo ""
+            fi
+            
+            sleep 30
+          done
+          
+          echo ""
+          echo "═══════════════════════════════════════════════════════════"
+          echo "⏱️  6 Hour Runtime Complete for Worker ${{ matrix.worker_number }}"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          # Final stats
+          echo "📊 Final Status:"
+          docker ps -f name="$WORKER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.RunningFor}}"
+          
+          echo ""
+          echo "📝 Last 20 log lines:"
+          docker logs $WORKER_NAME --tail 20
+
+      - name: 🛑 Cleanup Worker ${{ matrix.worker_number }}
+        if: always()
+        run: |
+          echo "🛑 Stopping worker ${{ matrix.worker_number }}..."
+          WORKER_NAME="${{ github.event.inputs.worker_prefix }}-worker-${{ github.run_id }}-${{ matrix.worker_number }}"
+          
+          docker ps -q -f name="$WORKER_NAME" | xargs -r docker stop
+          docker ps -aq -f name="$WORKER_NAME" | xargs -r docker rm
+          
+          echo "✅ Worker ${{ matrix.worker_number }} cleanup complete"
+
+  summary:
+    needs: spawn-workers
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: 📊 Deployment Summary
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "📊 20 Workers - 6 Hour Session Summary"
+          echo "═══════════════════════════════════════════════════════════"
+          echo ""
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Workflow: 20-workers-6h-continuous"
+          echo "Duration: 6 hours per worker"
+          echo "Total Workers: 20"
+          echo "Manager: 165.232.134.47"
+          echo ""
+          echo "✅ All workers have completed their 6-hour runtime"
+          echo "✅ Check manager database for task execution statistics"
+          echo ""
+          echo "To view worker history:"
+          echo "  manage_workers({ action: 'list' })"
+          echo ""
+
