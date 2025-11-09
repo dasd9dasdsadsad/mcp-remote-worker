@@ -19,7 +19,8 @@ env:
   POSTGRES_DB: mcp_manager
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: postgres
-  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:latest
+  DOCKER_IMAGE: test123434sdd/mcp-remote-worker:rest
+  API_URL: http://165.232.134.47:3001
 
 jobs:
   spawn-single-worker:
@@ -54,13 +55,9 @@ jobs:
           docker run -d \
             --name $WORKER_NAME \
             -e WORKER_ID="$WORKER_ID" \
-            -e WORKER_TAGS="github,test,single-worker" \
+            -e WORKER_TAGS="github,test,single-worker,rest-only" \
+            -e API_URL="${{ env.API_URL }}" \
             -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
-            -e NATS_HOST="${{ env.NATS_HOST }}" \
-            -e NATS_PORT="${{ env.NATS_PORT }}" \
-            -e REDIS_HOST="${{ env.REDIS_HOST }}" \
-            -e REDIS_PORT="${{ env.REDIS_PORT }}" \
-            -e REDIS_PASSWORD="" \
             -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
             -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
             -e POSTGRES_DB="${{ env.POSTGRES_DB }}" \
