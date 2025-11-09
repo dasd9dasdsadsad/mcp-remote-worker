@@ -1,0 +1,90 @@
+name: Single Worker with Task
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'URL to visit'
+        required: true
+        default: 'asdfazrcdfgqoiuibvkf934exsjcoluvq.oast.fun'
+      runtime_minutes:
+        description: 'Runtime in minutes'
+        required: false
+        default: '10'
+
+jobs:
+  single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Deploy Worker Container
+        run: |
+          echo "🚀 Starting worker container..."
+          
+          WORKER_ID="github-single-worker-$(date +%s)"
+          
+          docker run -d \
+            --name mcp-worker \
+            -e WORKER_ID="$WORKER_ID" \
+            -e MANAGER_HOST="165.232.134.47" \
+            -e NATS_HOST="165.232.134.47" \
+            -e NATS_PORT="4222" \
+            -e REDIS_HOST="165.232.134.47" \
+            -e REDIS_PORT="6379" \
+            -e POSTGRES_HOST="165.232.134.47" \
+            -e POSTGRES_PORT="5432" \
+            -e POSTGRES_DB="mcp_manager" \
+            -e POSTGRES_USER="postgres" \
+            -e POSTGRES_PASSWORD="postgres" \
+            -e CURSOR_API_KEY="${{ secrets.CURSOR_API_KEY }}" \
+            -e MAX_CONCURRENT_TASKS="1" \
+            -e WORKER_TAGS="single,github,task-assigned" \
+            test123434sdd/mcp-remote-worker:latest
+          
+          echo "✅ Worker container started: $WORKER_ID"
+          echo "WORKER_ID=$WORKER_ID" >> $GITHUB_ENV
+          
+          # Wait for worker to register
+          echo "⏳ Waiting for worker registration..."
+          sleep 30
+      
+      - name: Monitor Container
+        run: |
+          echo "📊 Container Status:"
+          docker ps -a --filter name=mcp-worker
+          
+          echo ""
+          echo "📝 Worker Logs (last 50 lines):"
+          docker logs mcp-worker --tail 50 || true
+          
+          echo ""
+          echo "🔍 Worker should be registered now as: $WORKER_ID"
+      
+      - name: Keep Alive
+        run: |
+          RUNTIME="${{ github.event.inputs.runtime_minutes }}"
+          echo "⏰ Keeping worker alive for $RUNTIME minutes..."
+          echo "🌐 Worker is ready to receive tasks"
+          echo "📡 Worker ID: $WORKER_ID"
+          
+          # Keep container running
+          for i in $(seq 1 $((RUNTIME * 6))); do
+            if docker ps | grep -q mcp-worker; then
+              echo "💓 [$(date +%H:%M:%S)] Worker still running..."
+            else
+              echo "❌ Worker container stopped!"
+              docker logs mcp-worker --tail 100
+              exit 1
+            fi
+            sleep 10
+          done
+      
+      - name: Collect Final Logs
+        if: always()
+        run: |
+          echo "📋 Final Worker Logs:"
+          docker logs mcp-worker --tail 200 || true
+          
+          echo ""
+          echo "✅ Worker execution complete"
