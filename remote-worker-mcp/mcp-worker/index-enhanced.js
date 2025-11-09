@@ -10,17 +10,15 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createClient } from "redis";
 import pg from "pg";
-import { connect, StringCodec } from "nats";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import os from "os";
+import fetch from "node-fetch";
 
 const { Pool } = pg;
-const sc = StringCodec();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,10 +34,8 @@ try {
   config = JSON.parse(readFileSync(configPath, "utf-8"));
 } catch (error) {
   config = {
-    redis: {
-      host: process.env.REDIS_HOST || "localhost",
-      port: parseInt(process.env.REDIS_PORT || "6379"),
-      password: process.env.REDIS_PASSWORD || ""
+    api: {
+      url: process.env.API_URL || `http://${process.env.API_HOST || 'localhost'}:${process.env.API_PORT || '4001'}`,
     },
     postgres: {
       host: process.env.POSTGRES_HOST || "localhost",
@@ -54,6 +50,27 @@ try {
 console.error("═══════════════════════════════════════════════════════════════");
 console.error("🚀 MCP WORKER - ENHANCED ANALYTICS VERSION");
 console.error("═══════════════════════════════════════════════════════════════");
+
+async function apiPost(path, payload) {
+  const baseUrl = config.api?.url || process.env.API_URL || `http://${process.env.API_HOST || 'localhost'}:${process.env.API_PORT || '4001'}`;
+  const url = `${baseUrl}${path}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API POST ${path} failed: ${response.status} ${text}`);
+  }
+
+  try {
+    return await response.json();
+  } catch (error) {
+    return { success: true };
+  }
+}
 
 // Worker Identity & Session Management
 const WORKER_ID = process.env.WORKER_ID || `worker-${uuidv4()}`;
@@ -96,37 +113,7 @@ console.error(`Version: ${WORKER_VERSION}`);
 // CONNECTIONS
 // ═══════════════════════════════════════════════════════════════════════
 
-// Initialize NATS
-let natsConnection;
-try {
-  const natsHost = process.env.NATS_HOST || 'localhost';
-  const natsPort = process.env.NATS_PORT || '4222';
-  console.error(`Connecting to NATS at ${natsHost}:${natsPort}`);
-  natsConnection = await connect({
-    servers: [`nats://${natsHost}:${natsPort}`],
-    reconnect: true,
-    maxReconnectAttempts: -1,
-  });
-  console.error("✅ Connected to NATS");
-} catch (error) {
-  console.error("❌ Failed to connect to NATS:", error.message);
-  process.exit(1);
-}
-
-// Initialize Redis
-const redis = createClient({
-  socket: {
-    host: config.redis.host,
-    port: config.redis.port,
-  },
-  password: config.redis.password,
-});
-
-redis.on("error", (err) => console.error("Redis Error:", err));
-await redis.connect();
-console.error("✅ Connected to Redis");
-
-// Initialize PostgreSQL
+// Initialize PostgreSQL (for local analytics storage if needed)
 const pgPool = new Pool({
   host: config.postgres.host,
   port: config.postgres.port,
@@ -825,44 +812,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           uptime_ms: Date.now() - performanceMetrics.startTime,
         };
 
-        const progressUpdate = {
+        const progressPayload = {
+          task_id: task_id || TASK_ID,
           worker_id: WORKER_ID,
-          task_id,
-          status,
-          phase,
-          metrics: enhancedMetrics,
-          context,
-          timestamp,
-          session_id: SESSION_ID,
+          progress_percent: enhancedMetrics.percent_complete,
+          phase: phase || metrics.current_operation,
+          message: status,
         };
 
-        // Publish to NATS
-        await natsConnection.publish(
-          `worker.progress.${WORKER_ID}`,
-          sc.encode(JSON.stringify(progressUpdate))
-        );
+        await apiPost('/api/progress', progressPayload);
 
-        // Store in Redis for quick access
-        await redis.hSet(`task:${task_id}:progress`, {
-          status,
-          phase: phase || "",
-          percent_complete: metrics.percent_complete.toString(),
-          last_update: timestamp,
-        });
-
-        // Store in PostgreSQL for historical tracking
         if (pgPool) {
           await pgPool.query(
-            `INSERT INTO task_progress (task_id, worker_id, status, phase, metrics, context, timestamp)
+            `INSERT INTO task_progress (task_id, worker_id, status, phase, metrics, context, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-            [task_id, WORKER_ID, status, phase, JSON.stringify(enhancedMetrics), JSON.stringify(context)]
+            [progressPayload.task_id, WORKER_ID, status, progressPayload.phase, JSON.stringify(enhancedMetrics), JSON.stringify(context)]
           );
         }
 
         result = {
           content: [{
             type: "text",
-            text: `Progress: ${status} - ${phase || metrics.current_operation} (${metrics.percent_complete}%)`,
+            text: `Progress: ${status} - ${progressPayload.phase || metrics.current_operation} (${metrics.percent_complete}%)`,
           }],
         };
         break;
@@ -870,18 +841,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_milestone": {
         const milestone = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          milestone_name: args.milestone_name,
+          milestone_type: args.milestone_type,
+          milestone_data: args,
         };
 
-        performanceMetrics.milestones.push(milestone);
+        performanceMetrics.milestones.push({ ...milestone, timestamp });
 
-        await natsConnection.publish(
-          `worker.milestone.${WORKER_ID}`,
-          sc.encode(JSON.stringify(milestone))
-        );
+        await apiPost('/api/milestones', milestone);
 
         result = {
           content: [{
@@ -894,22 +863,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_analytics": {
         const analytics = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          analytics_type: args.analytics_type || 'custom',
+          analytics_data: args,
         };
 
-        // Store in analytics data
         if (!analyticsData[args.analytics_type]) {
           analyticsData[args.analytics_type] = [];
         }
-        analyticsData[args.analytics_type].push(analytics);
+        analyticsData[args.analytics_type].push({ ...args, timestamp });
 
-        await natsConnection.publish(
-          `worker.analytics.${args.analytics_type}`,
-          sc.encode(JSON.stringify(analytics))
-        );
+        await apiPost('/api/analytics', analytics);
 
         result = {
           content: [{
@@ -922,26 +887,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "stream_realtime_data": {
         const stream = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          session_id: SESSION_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          analytics_type: `stream:${args.stream_type}`,
+          analytics_data: { ...args, session_id: SESSION_ID, timestamp },
         };
 
-        await natsConnection.publish(
-          `worker.stream.${args.stream_type}.${WORKER_ID}`,
-          sc.encode(JSON.stringify(stream))
-        );
-
-        // Store important streams in Redis
-        if (args.priority === "critical" || args.priority === "high") {
-          await redis.lPush(
-            `stream:${TASK_ID}:${args.stream_type}`,
-            JSON.stringify(stream)
-          );
-          await redis.lTrim(`stream:${TASK_ID}:${args.stream_type}`, 0, 999);
-        }
+        await apiPost('/api/analytics', stream);
 
         result = {
           content: [{
@@ -954,18 +906,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_decision": {
         const decision = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          analytics_type: 'decision',
+          analytics_data: { ...args, timestamp },
         };
 
-        analyticsData.decisionPoints.push(decision);
+        analyticsData.decisionPoints.push(decision.analytics_data);
 
-        await natsConnection.publish(
-          `worker.decision.${WORKER_ID}`,
-          sc.encode(JSON.stringify(decision))
-        );
+        await apiPost('/api/analytics', decision);
 
         result = {
           content: [{
@@ -978,26 +927,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_test_results": {
         const testResults = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          analytics_type: 'test_results',
+          analytics_data: { ...args, timestamp },
         };
 
-        analyticsData.testResults.push(testResults);
+        analyticsData.testResults.push(testResults.analytics_data);
 
-        await natsConnection.publish(
-          `worker.tests.${WORKER_ID}`,
-          sc.encode(JSON.stringify(testResults))
-        );
-
-        // Store summary in Redis
-        await redis.hSet(`task:${TASK_ID}:tests`, {
-          total: args.results.total_tests.toString(),
-          passed: args.results.passed.toString(),
-          failed: args.results.failed.toString(),
-          coverage: args.results.coverage_percent?.toString() || "0",
-        });
+        await apiPost('/api/analytics', testResults);
 
         result = {
           content: [{
@@ -1010,21 +948,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_error": {
         const errorReport = {
-          worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          worker_id: WORKER_ID,
+          analytics_type: 'error',
+          analytics_data: { ...args, timestamp },
         };
 
-        performanceMetrics.errors.push(errorReport);
+        performanceMetrics.errors.push(errorReport.analytics_data);
 
-        await natsConnection.publish(
-          `worker.error.${WORKER_ID}`,
-          sc.encode(JSON.stringify(errorReport))
-        );
-
-        // Store in Redis for quick access
-        await redis.lPush(`errors:${TASK_ID}`, JSON.stringify(errorReport));
+        await apiPost('/api/analytics', errorReport);
 
         result = {
           content: [{
@@ -1041,30 +973,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           question_id: questionId,
           worker_id: WORKER_ID,
           task_id: TASK_ID,
-          timestamp,
-          ...args,
+          question: args.question,
+          question_type: args.question_type,
+          context: args.context || {},
         };
 
         try {
-          const response = await natsConnection.request(
-            `manager.question.${args.question_type}`,
-            sc.encode(JSON.stringify(question)),
-            { timeout: args.response_needed_by_ms || 30000 }
-          );
-
-          const answer = JSON.parse(sc.decode(response.data));
+          await apiPost('/api/questions', question);
 
           result = {
             content: [{
               type: "text",
-              text: `Manager: ${answer.response}`,
+              text: `Question submitted to manager (ID: ${questionId}). Await guidance and poll later via list_pending_questions()`,
             }],
           };
         } catch (error) {
           result = {
             content: [{
               type: "text",
-              text: `Manager unavailable: ${error.message}`,
+              text: `Failed to submit question: ${error.message}`,
             }],
           };
         }
@@ -1073,64 +1000,61 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "report_completion": {
         const completion = {
+          task_id: args.task_id || TASK_ID,
           worker_id: WORKER_ID,
-          timestamp,
-          ...args,
-          performance_summary: {
-            total_tool_calls: Array.from(performanceMetrics.toolCalls.values()).reduce((a, b) => a + b.count, 0),
-            total_errors: performanceMetrics.errors.length,
-            total_milestones: performanceMetrics.milestones.length,
-            execution_time_ms: Date.now() - performanceMetrics.startTime,
+          status: args.status || 'completed',
+          summary: args.summary || {},
+          analytics: {
+            ...args,
+            performance_summary: {
+              total_tool_calls: Array.from(performanceMetrics.toolCalls.values()).reduce((a, b) => a + b.count, 0),
+              total_errors: performanceMetrics.errors.length,
+              total_milestones: performanceMetrics.milestones.length,
+              execution_time_ms: Date.now() - performanceMetrics.startTime,
+            },
+            analytics_summary: analyticsData,
           },
-          analytics_summary: analyticsData,
         };
 
-        await natsConnection.publish(
-          `worker.completion.${WORKER_ID}`,
-          sc.encode(JSON.stringify(completion))
-        );
+        await apiPost('/api/completions', completion);
 
-        // Store completion in PostgreSQL
         if (pgPool) {
           await pgPool.query(
             `INSERT INTO task_completions (task_id, worker_id, status, summary, analytics, timestamp)
              VALUES ($1, $2, $3, $4, $5, NOW())`,
-            [args.task_id, WORKER_ID, args.status, JSON.stringify(args.summary), JSON.stringify(completion)]
+            [completion.task_id, completion.worker_id, completion.status, JSON.stringify(completion.summary), JSON.stringify(completion.analytics)]
           );
         }
 
         result = {
           content: [{
             type: "text",
-            text: `Task completed: ${args.status}\n${JSON.stringify(args.summary, null, 2)}`,
+            text: `Task completed: ${completion.status}\n${JSON.stringify(completion.summary, null, 2)}`,
           }],
         };
         break;
       }
 
       case "report_heartbeat": {
-        const heartbeat = {
-          timestamp,
-          ...args,
-          uptime_ms: Date.now() - performanceMetrics.startTime,
+        const heartbeatPayload = {
+          worker_id: args.worker_id || WORKER_ID,
+          status: args.status,
+          health: args.health || {},
         };
 
-        await natsConnection.publish(
-          `worker.heartbeat.${args.worker_id || WORKER_ID}`,
-          sc.encode(JSON.stringify(heartbeat))
-        );
-
-        // Update Redis
-        await redis.hSet(`worker:${args.worker_id || WORKER_ID}`, {
-          status: args.status,
-          last_heartbeat: timestamp,
-          health: JSON.stringify(args.health || {}),
-        });
+        if (pgPool) {
+          await pgPool.query(
+            `UPDATE remote_workers
+             SET last_heartbeat = NOW(), status = $1, updated_at = NOW()
+             WHERE worker_id = $2`,
+            [heartbeatPayload.status || 'idle', heartbeatPayload.worker_id]
+          );
+        }
 
         result = {
           content: [{
             type: "text",
-            text: `Heartbeat: ${args.status}`,
+            text: `Heartbeat: ${heartbeatPayload.status}`,
           }],
         };
         break;

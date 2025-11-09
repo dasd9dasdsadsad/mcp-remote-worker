@@ -7,9 +7,11 @@
       ],
       "env": {
         "WORKER_TYPE": "enhanced",
-        "NATS_HOST": "localhost",
-        "REDIS_HOST": "localhost",
-        "POSTGRES_HOST": "localhost",
+        "NATS_HOST": "165.232.134.47",
+        "REDIS_HOST": "165.232.134.47",
+        "POSTGRES_HOST": "165.232.134.47",
+        "POSTGRES_DB": "mcp_manager",
+        "POSTGRES_USER": "postgres",
         "POSTGRES_PASSWORD": "postgres"
       },
       "alwaysAllow": [

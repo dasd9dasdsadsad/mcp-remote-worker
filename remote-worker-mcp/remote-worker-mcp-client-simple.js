@@ -5,17 +5,15 @@
  */
 
 import { spawn } from 'child_process';
-import { connect, StringCodec } from 'nats';
-import { createClient } from 'redis';
 import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fetch from 'node-fetch';
 
 const { Pool } = pg;
-const sc = StringCodec();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -34,19 +32,12 @@ const CONFIG = {
   // Manager connection
   managerHost: process.env.MANAGER_HOST || 'localhost',
   
-  // NATS configuration
-  nats: {
-    host: process.env.NATS_HOST || process.env.MANAGER_HOST || 'localhost',
-    port: parseInt(process.env.NATS_PORT || '4222'),
+  // REST API configuration
+  api: {
+    url: process.env.API_URL || `http://${process.env.API_HOST || process.env.MANAGER_HOST || 'localhost'}:${process.env.API_PORT || '4001'}`,
+    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '5000'),
   },
-  
-  // Redis configuration  
-  redis: {
-    host: process.env.REDIS_HOST || process.env.MANAGER_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD || '',
-  },
-  
+   
   // PostgreSQL configuration
   postgres: {
     host: process.env.POSTGRES_HOST || process.env.MANAGER_HOST || 'localhost',
@@ -84,53 +75,8 @@ console.error('═════════════════════�
 // INFRASTRUCTURE CONNECTIONS
 // ══════════════════════════════════════════════════════════════════
 
-let natsConnection;
-let redis;
 let pgPool;
 const activeTasks = new Map();
-
-// Connect to NATS
-async function connectNATS() {
-  try {
-    const natsUrl = `nats://${CONFIG.nats.host}:${CONFIG.nats.port}`;
-    console.error(`Connecting to NATS at ${natsUrl}...`);
-    
-    natsConnection = await connect({
-      servers: [natsUrl],
-      reconnect: true,
-      maxReconnectAttempts: -1,
-      reconnectTimeWait: 2000,
-    });
-    
-    console.error('✅ Connected to NATS');
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to connect to NATS:', error.message);
-    return false;
-  }
-}
-
-// Connect to Redis
-async function connectRedis() {
-  try {
-    console.error(`Connecting to Redis at ${CONFIG.redis.host}:${CONFIG.redis.port}...`);
-    
-    redis = createClient({
-      socket: {
-        host: CONFIG.redis.host,
-        port: CONFIG.redis.port,
-      },
-      password: CONFIG.redis.password || undefined,
-    });
-    
-    await redis.connect();
-    console.error('✅ Connected to Redis');
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to connect to Redis:', error.message);
-    return false;
-  }
-}
 
 // Connect to PostgreSQL
 async function connectPostgreSQL() {
@@ -148,6 +94,26 @@ async function connectPostgreSQL() {
     console.error('⚠️  WARNING: Failed to connect to PostgreSQL:', error.message);
     pgPool = null;
     return false;
+  }
+}
+
+async function apiPost(path, payload) {
+  const url = `${CONFIG.api.url}${path}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API POST ${path} failed: ${response.status} ${text}`);
+  }
+
+  try {
+    return await response.json();
+  } catch (error) {
+    return { success: true };
   }
 }
 
@@ -203,10 +169,13 @@ async function registerWorker() {
       );
       console.error('✅ Registered in PostgreSQL');
     }
+
+    await apiPost('/api/workers/register', workerInfo);
     
     // Register in Redis
-    await redis.set(`remote_worker:${CONFIG.workerId}`, JSON.stringify(workerInfo));
-    await redis.sAdd('remote_workers:active', CONFIG.workerId);
+    // This section is removed as per the edit hint to remove NATS/Redis settings.
+    // await redis.set(`remote_worker:${CONFIG.workerId}`, JSON.stringify(workerInfo));
+    // await redis.sAdd('remote_workers:active', CONFIG.workerId);
     
     console.error(`✅ Worker registered: ${CONFIG.workerId}`);
     
@@ -234,11 +203,12 @@ async function sendHeartbeat() {
     };
     
     // Update Redis
-    await redis.set(`remote_worker:${CONFIG.workerId}`, JSON.stringify({
-      ...heartbeat,
-      hostname: CONFIG.hostname,
-      last_heartbeat: heartbeat.timestamp,
-    }));
+    // This section is removed as per the edit hint to remove NATS/Redis settings.
+    // await redis.set(`remote_worker:${CONFIG.workerId}`, JSON.stringify({
+    //   ...heartbeat,
+    //   hostname: CONFIG.hostname,
+    //   last_heartbeat: heartbeat.timestamp,
+    // }));
     
     // Update PostgreSQL
     if (pgPool) {
@@ -250,11 +220,12 @@ async function sendHeartbeat() {
       );
     }
     
-    // Publish to NATS
-    natsConnection.publish(
-      `worker.heartbeat.${CONFIG.workerId}`,
-      sc.encode(JSON.stringify(heartbeat))
-    );
+    await apiPost('/api/workers/heartbeat', {
+      worker_id: CONFIG.workerId,
+      status: heartbeat.status,
+      active_tasks: heartbeat.active_tasks,
+      health: heartbeat.system_info,
+    });
     
   } catch (error) {
     console.error('❌ Heartbeat error:', error.message);
@@ -278,23 +249,23 @@ async function executeTask(taskData) {
   activeTasks.set(taskId, { startTime, taskData });
   
   try {
-    // Load analytics prompt
-    let analyticsPrompt = '';
-    try {
-      analyticsPrompt = fs.readFileSync('/app/ai-analytics-prompt.txt', 'utf8');
-    } catch (e) {
-      console.error('Warning: Could not load analytics prompt');
-    }
-    
-    // Combine analytics prompt with task description
-    const enhancedPrompt = analyticsPrompt + '\n\nTASK TO EXECUTE:\n' + taskDescription;
+    // Use task description directly - analytics prompt causes MCP tool errors in print mode
+    // TODO: Fix MCP tool initialization in print mode to re-enable analytics
+    const enhancedPrompt = taskDescription;
     
     // Execute cursor-agent DIRECTLY without wrapper script
+    // CRITICAL FIX: Use -p (print mode) for non-interactive output, REMOVE --approve-mcps (causes hang)
+    console.log('🔍 DEBUG: About to spawn cursor-agent (with MCP tools support)');
+    console.log('🔍 DEBUG: Command:', 'cursor-agent');
+    console.log('🔍 DEBUG: Args:', ['-p', enhancedPrompt, '--force']);
+    console.log('🔍 DEBUG: CWD:', '/app');
+    console.log('🔍 DEBUG: Prompt length:', enhancedPrompt.length);
+    console.log('🔍 DEBUG: HOME:', process.env.HOME || '/root');
+    
     const cursorProcess = spawn('cursor-agent', [
-      '--model', 'auto',
-      '-p', enhancedPrompt,
-      '--approve-mcps',
-      '--force'
+      '-p',                    // Enable print/headless mode for non-interactive use
+      enhancedPrompt,          // Prompt as first positional argument after -p
+      '--force'                // Force allow commands
     ], {
       cwd: '/app',
       env: {
@@ -305,8 +276,10 @@ async function executeTask(taskData) {
         WORKER_ID: CONFIG.workerId,
         SESSION_ID: taskId,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['inherit', 'pipe', 'pipe'], // Use inherit for stdin to simulate -it behavior
     });
+    
+    console.log('🔍 DEBUG: cursor-agent spawned, PID:', cursorProcess.pid);
     
     let stdout = '';
     let stderr = '';
@@ -314,13 +287,17 @@ async function executeTask(taskData) {
     cursorProcess.stdout.on('data', (data) => {
       const output = data.toString();
       stdout += output;
-      console.log(output);
+      console.log('📤 STDOUT:', output);
     });
     
     cursorProcess.stderr.on('data', (data) => {
       const output = data.toString();
       stderr += output;
-      console.error(output);
+      console.error('📤 STDERR:', output);
+    });
+    
+    cursorProcess.on('error', (error) => {
+      console.error('❌ Process Error:', error);
     });
     
     // Wait for completion
@@ -335,7 +312,19 @@ async function executeTask(taskData) {
     console.log(`✅ Task completed: ${taskId}`);
     console.log(`   Exit code: ${exitCode}`);
     console.log(`   Duration: ${executionTime}ms`);
+    console.log(`   STDOUT captured: ${stdout.length} bytes`);
+    console.log(`   STDERR captured: ${stderr.length} bytes`);
     console.log('═══════════════════════════════════════════════════════════════');
+    
+    if (stdout.length > 0) {
+      console.log('📋 STDOUT CONTENT:');
+      console.log(stdout);
+    }
+    
+    if (stderr.length > 0) {
+      console.log('📋 STDERR CONTENT:');
+      console.error(stderr);
+    }
     
     // Report completion
     await reportCompletion(taskId, success, {
@@ -366,7 +355,7 @@ async function reportCompletion(taskId, success, analytics) {
       analytics,
     };
     
-    // Store in PostgreSQL
+    // Store in PostgreSQL for audit trail
     if (pgPool) {
       await pgPool.query(
         `INSERT INTO remote_worker_events (worker_id, event_type, event_data)
@@ -375,11 +364,13 @@ async function reportCompletion(taskId, success, analytics) {
       );
     }
     
-    // Publish to NATS
-    natsConnection.publish(
-      'task.completion',
-      sc.encode(JSON.stringify(completion))
-    );
+    await apiPost('/api/completions', {
+      task_id: taskId,
+      worker_id: CONFIG.workerId,
+      status: success ? 'completed' : 'failed',
+      summary: analytics,
+      analytics,
+    });
     
     console.error(`✅ Completion reported for: ${taskId}`);
   } catch (error) {
@@ -387,33 +378,36 @@ async function reportCompletion(taskId, success, analytics) {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// TASK LISTENER
-// ══════════════════════════════════════════════════════════════════
+async function pollForTask() {
+  if (activeTasks.size >= CONFIG.maxConcurrentTasks) {
+    return;
+  }
+
+  try {
+    const response = await apiPost('/api/task-queue/next', {
+      worker_id: CONFIG.workerId,
+    });
+
+    if (response.success && response.task) {
+      console.error(`📨 Received task: ${response.task.task_id}`);
+      executeTask(response.task).catch((err) => {
+        console.error(`❌ Task execution error: ${err.message}`);
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Task polling error: ${error.message}`);
+  }
+}
 
 async function startTaskListener() {
-  console.error('📡 Setting up task listener...');
-  
-  const taskSub = natsConnection.subscribe(`worker.task.${CONFIG.workerId}`);
-  
-  console.error(`✅ Subscribed to: worker.task.${CONFIG.workerId}`);
-  
-  (async () => {
-    for await (const msg of taskSub) {
-      try {
-        const taskData = JSON.parse(sc.decode(msg.data));
-        console.error(`📨 Received task: ${taskData.task_id}`);
-        
-        // Execute task (non-blocking)
-        executeTask(taskData).catch(err => {
-          console.error(`❌ Task execution error: ${err.message}`);
-        });
-        
-      } catch (error) {
-        console.error('❌ Error processing task message:', error.message);
-      }
-    }
-  })();
+  console.error('📡 Starting REST task polling...');
+
+  const poll = async () => {
+    await pollForTask();
+  };
+
+  await poll();
+  setInterval(poll, CONFIG.api.pollIntervalMs);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -423,8 +417,9 @@ async function startTaskListener() {
 async function main() {
   try {
     // Connect to infrastructure
-    await connectNATS();
-    await connectRedis();
+    // This section is removed as per the edit hint to remove NATS/Redis settings.
+    // await connectNATS();
+    // await connectRedis();
     await connectPostgreSQL();
     
     // Register worker
@@ -449,9 +444,11 @@ async function main() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.error('\n🛑 Shutting down...');
-  if (redis) await redis.quit();
+  // This section is removed as per the edit hint to remove NATS/Redis settings.
+  // if (redis) await redis.quit();
   if (pgPool) await pgPool.end();
-  if (natsConnection) await natsConnection.close();
+  // This section is removed as per the edit hint to remove NATS/Redis settings.
+  // if (natsConnection) await natsConnection.close();
   process.exit(0);
 });
 
