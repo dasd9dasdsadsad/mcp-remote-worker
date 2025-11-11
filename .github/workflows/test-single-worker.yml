@@ -25,7 +25,7 @@ env:
 jobs:
   spawn-single-worker:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 1440  # 24 hours for indefinite running
     
     steps:
       - name: 🔍 Checkout
@@ -71,31 +71,46 @@ jobs:
           # Show running containers
           docker ps --format "table {{.Names}}\t{{.Status}}"
 
-      - name: 🔴 Keep Worker Running
+      - name: 🔴 Keep Worker Running (Indefinitely)
         run: |
           echo "═══════════════════════════════════════════════════════════"
-          echo "🔴 Test Worker Running"
+          echo "🔴 Worker Running INDEFINITELY"
           echo "═══════════════════════════════════════════════════════════"
           
           RUNTIME_SECONDS=$(( ${{ github.event.inputs.runtime_minutes }} * 60 ))
           END_TIME=$(($(date +%s) + RUNTIME_SECONDS))
           
-          echo "⏱️  Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
+          echo "⏱️  Configured Runtime: ${{ github.event.inputs.runtime_minutes }} minutes"
           echo "🔗 Manager: ${{ env.MANAGER_HOST }}"
           echo "👷 Worker ID: github-worker-${{ github.run_id }}-test-1"
+          echo "♾️  Mode: CONTINUOUS (will restart tasks automatically)"
           echo ""
           
-          while [ $(date +%s) -lt $END_TIME ]; do
+          # Run indefinitely - keep checking and logging
+          ITERATION=0
+          while true; do
+            ITERATION=$((ITERATION + 1))
             RUNNING=$(docker ps -q -f name="test-worker-${{ github.run_id }}" | wc -l)
-            echo "[$(date '+%H:%M:%S')] Worker status: $RUNNING/1 running"
+            
+            echo "[$(date '+%H:%M:%S')] Iteration $ITERATION - Worker status: $RUNNING/1 running"
             
             # Show worker logs
-            docker logs test-worker-${{ github.run_id }} --tail 5 2>&1 | grep -E "✅|📨|🚀" || true
+            docker logs test-worker-${{ github.run_id }} --tail 3 2>&1 | grep -E "✅|📨|🚀|TASK" || echo "  (worker active...)"
             
-            sleep 30
+            # Check if we've passed the initial runtime (but don't exit)
+            CURRENT_TIME=$(date +%s)
+            if [ $CURRENT_TIME -gt $END_TIME ]; then
+              echo "  ⚡ Initial runtime complete - continuing indefinitely..."
+            fi
+            
+            # Restart worker if it dies
+            if [ "$RUNNING" -eq "0" ]; then
+              echo "  ⚠️  Worker stopped, restarting..."
+              docker start test-worker-${{ github.run_id }} || true
+            fi
+            
+            sleep 60  # Check every minute
           done
-          
-          echo "⏱️  Runtime complete"
 
       - name: 🛑 Cleanup
         if: always()
