@@ -20,7 +20,7 @@ env:
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: postgres
   DOCKER_IMAGE: test123434sdd/mcp-remote-worker:rest
-  API_URL: http://165.232.134.47:3001
+  API_URL: http://165.232.134.47:4001
 
 jobs:
   spawn-single-worker:
@@ -57,6 +57,7 @@ jobs:
             -e WORKER_ID="$WORKER_ID" \
             -e WORKER_TAGS="github,test,single-worker,rest-only" \
             -e API_URL="${{ env.API_URL }}" \
+            -e NATS_HOST="${{ env.NATS_HOST }}" \
             -e MANAGER_HOST="${{ env.MANAGER_HOST }}" \
             -e POSTGRES_HOST="${{ env.POSTGRES_HOST }}" \
             -e POSTGRES_PORT="${{ env.POSTGRES_PORT }}" \
